@@ -174,6 +174,16 @@ python -m spacy download en_core_web_lg
 
 > The `run.sh` script checks for Tesseract, prints the ASCII banner, and starts Uvicorn with `--reload`.
 
+### Production Deployment (Dokploy)
+
+DocMasker includes a production-ready `Dockerfile` and is fully stateless across async event loops thanks to a threadpool architecture and file-based session management, making it safe for multiple concurrent ("live") users.
+
+1. Connect your GitHub repository in your Dokploy project.
+2. Select **Docker** as the Build Type.
+3. (Optional) Set up persistent volumes for `/app/uploads` and `/app/outputs` if you want sessions and output files to survive container restarts.
+4. Expose Port `8000`.
+5. Deploy! Dokploy will automatically build the image, install Tesseract, and fetch the required NLP models.
+
 ---
 
 ## API Reference

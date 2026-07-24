@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
 from presidio_analyzer.nlp_engine import NlpEngineProvider
@@ -65,8 +66,18 @@ analyzer = AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=["en"])
 anonymizer = AnonymizerEngine()
 logger.info("Presidio ready.")
 
-# ─── In-memory session store ──────────────────────────────────────────────────
-sessions: dict = {}
+# ─── Disk-based session store ───────────────────────────────────────────────────
+def get_session(session_id: str) -> Optional[dict]:
+    path = UPLOAD_DIR / f"{session_id}.json"
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def save_session(session_id: str, data: dict):
+    path = UPLOAD_DIR / f"{session_id}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
 
 # ─── PII entity types ─────────────────────────────────────────────────────────
 ENTITY_TYPES = [
@@ -301,21 +312,22 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         if scanned:
             logger.info("Running OCR…")
-            pages = extract_text_ocr(str(pdf_path), doc)
+            pages = await run_in_threadpool(extract_text_ocr, str(pdf_path), doc)
             ocr_used = True
         else:
-            pages = extract_text_native(doc)
+            pages = await run_in_threadpool(extract_text_native, doc)
             ocr_used = False
 
         logger.info("Running Presidio…")
-        entities = run_presidio(pages)
+        entities = await run_in_threadpool(run_presidio, pages)
         logger.info(f"Found {len(entities)} PII entities.")
 
         # Generate page previews (clean, no highlights yet)
         previews = []
         for i in range(page_count):
             mat = fitz.Matrix(150 / 72, 150 / 72)
-            pix = doc[i].get_pixmap(matrix=mat)
+            # Generating previews can also be heavy
+            pix = await run_in_threadpool(doc[i].get_pixmap, matrix=mat)
             img_b64 = base64.b64encode(pix.tobytes("png")).decode()
             previews.append({
                 "page": i,
@@ -326,7 +338,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         doc.close()
 
-        sessions[session_id] = {
+        session_data = {
             "pdf_path": str(pdf_path),
             "entities": entities,
             "pages": pages,
@@ -334,6 +346,8 @@ async def upload_pdf(file: UploadFile = File(...)):
             "ocr_used": ocr_used,
             "filename": file.filename,
         }
+        
+        save_session(session_id, session_data)
 
         return {
             "session_id": session_id,
@@ -349,9 +363,71 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(500, f"Processing failed: {str(e)}")
 
 
+
+
+def do_redact_cpu(session, to_redact, manual_regions):
+    doc = fitz.open(session["pdf_path"])
+    output_id = str(uuid.uuid4())
+    output_path = OUTPUT_DIR / f"{output_id}_redacted.pdf"
+
+    # ── Presidio-detected entities ────────────────────────────────────
+    for ent in to_redact:
+        for sp in ent["spans"]:
+            page = doc[sp["page"]]
+            rect = fitz.Rect(sp["bbox"])
+            # Expand rect slightly for full coverage
+            rect = rect + (-2, -2, 2, 2)
+            page.add_redact_annot(rect, fill=(0, 0, 0))
+
+    # ── Manually drawn regions ────────────────────────────────────────
+    for region in manual_regions:
+        if 0 <= region.page < len(doc):
+            page = doc[region.page]
+            rect = fitz.Rect(region.bbox)
+            rect = rect + (-2, -2, 2, 2)  # small expansion for safety
+            page.add_redact_annot(rect, fill=(0, 0, 0))
+            logger.info(f"Manual region on page {region.page}: {region.bbox}")
+
+    for page in doc:
+        # images=True also scrubs images that overlap redact rectangles
+        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+
+    # ── Strip all metadata to prevent info leakage ────────────────────
+    doc.set_metadata({
+        "title": "", "author": "", "subject": "",
+        "keywords": "", "creator": "", "producer": "",
+        "creationDate": "", "modDate": "",
+    })
+    # Remove XML metadata stream if present
+    try:
+        doc.del_xml_metadata()
+    except Exception:
+        pass
+
+    doc.save(str(output_path), garbage=4, deflate=True, clean=True, no_new_id=True)
+    doc.close()
+
+    # ── Render page previews of the redacted PDF ──────────────────────
+    redacted_doc = fitz.open(str(output_path))
+    redacted_previews = []
+    for i in range(len(redacted_doc)):
+        mat = fitz.Matrix(150 / 72, 150 / 72)
+        pix = redacted_doc[i].get_pixmap(matrix=mat)
+        img_b64 = base64.b64encode(pix.tobytes("png")).decode()
+        redacted_previews.append({
+            "page": i,
+            "width": redacted_doc[i].rect.width,
+            "height": redacted_doc[i].rect.height,
+            "image_b64": img_b64,
+        })
+    redacted_doc.close()
+    
+    return output_id, redacted_previews
+
+
 @app.post("/api/redact")
 async def redact_pdf(req: RedactRequest):
-    session = sessions.get(req.session_id)
+    session = get_session(req.session_id)
     if not session:
         raise HTTPException(404, "Session not found. Please re-upload the PDF.")
 
@@ -364,65 +440,12 @@ async def redact_pdf(req: RedactRequest):
         raise HTTPException(400, "No entities or regions selected for redaction.")
 
     try:
-        doc = fitz.open(session["pdf_path"])
-        output_id = str(uuid.uuid4())
-        output_path = OUTPUT_DIR / f"{output_id}_redacted.pdf"
-
-        # ── Presidio-detected entities ────────────────────────────────────
-        for ent in to_redact:
-            for sp in ent["spans"]:
-                page = doc[sp["page"]]
-                rect = fitz.Rect(sp["bbox"])
-                # Expand rect slightly for full coverage
-                rect = rect + (-2, -2, 2, 2)
-                page.add_redact_annot(rect, fill=(0, 0, 0))
-
-        # ── Manually drawn regions ────────────────────────────────────────
-        for region in req.manual_regions:
-            if 0 <= region.page < len(doc):
-                page = doc[region.page]
-                rect = fitz.Rect(region.bbox)
-                rect = rect + (-2, -2, 2, 2)  # small expansion for safety
-                page.add_redact_annot(rect, fill=(0, 0, 0))
-                logger.info(f"Manual region on page {region.page}: {region.bbox}")
-
-        for page in doc:
-            # images=True also scrubs images that overlap redact rectangles
-            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-
-        # ── Strip all metadata to prevent info leakage ────────────────────
-        doc.set_metadata({
-            "title": "", "author": "", "subject": "",
-            "keywords": "", "creator": "", "producer": "",
-            "creationDate": "", "modDate": "",
-        })
-        # Remove XML metadata stream if present
-        try:
-            doc.del_xml_metadata()
-        except Exception:
-            pass
-
-        doc.save(str(output_path), garbage=4, deflate=True, clean=True, no_new_id=True)
-        doc.close()
-
-        # ── Render page previews of the redacted PDF ──────────────────────
-        redacted_doc = fitz.open(str(output_path))
-        redacted_previews = []
-        for i in range(len(redacted_doc)):
-            mat = fitz.Matrix(150 / 72, 150 / 72)
-            pix = redacted_doc[i].get_pixmap(matrix=mat)
-            img_b64 = base64.b64encode(pix.tobytes("png")).decode()
-            redacted_previews.append({
-                "page": i,
-                "width": redacted_doc[i].rect.width,
-                "height": redacted_doc[i].rect.height,
-                "image_b64": img_b64,
-            })
-        redacted_doc.close()
+        output_id, redacted_previews = await run_in_threadpool(do_redact_cpu, session, to_redact, req.manual_regions)
 
         # ── Persist output info in session for re-downloads ───────────────
         session["output_id"] = output_id
         session["filename"]  = session.get("filename", "document.pdf")
+        save_session(req.session_id, session)
 
         return {
             "output_id": output_id,
@@ -442,10 +465,39 @@ class SearchRequest(BaseModel):
     query: str
 
 
+def do_search_cpu(pdf_path, query):
+    doc = fitz.open(pdf_path)
+    matches = []
+    
+    for page_num, page in enumerate(doc):
+        rects = page.search_for(query, quads=False)
+        if rects:
+            spans = [
+                {
+                    "bbox": list(r),
+                    "page": page_num,
+                    "page_width": page.rect.width,
+                    "page_height": page.rect.height,
+                }
+                for r in rects
+            ]
+            matches.append({
+                "id": str(uuid.uuid4()),
+                "type": "MANUAL_SEARCH",
+                "text": query,
+                "score": 1.0,
+                "spans": spans,
+                "color": "#FF6B6B",
+                "manual": True,
+            })
+    doc.close()
+    return matches
+
+
 @app.post("/api/search")
 async def search_text(req: SearchRequest):
     """Find all occurrences of a text string in the PDF and return as entity objects."""
-    session = sessions.get(req.session_id)
+    session = get_session(req.session_id)
     if not session:
         raise HTTPException(404, "Session not found.")
 
@@ -454,12 +506,6 @@ async def search_text(req: SearchRequest):
         raise HTTPException(400, "Search query cannot be empty.")
 
     try:
-        doc = fitz.open(session["pdf_path"])
-        matches = []
-
-        for page_num, page in enumerate(doc):
-            rects = page.search_for(query, quads=False)
-            if rects:
                 spans = [
                     {
                         "bbox": list(r),
