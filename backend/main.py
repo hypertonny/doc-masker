@@ -506,26 +506,7 @@ async def search_text(req: SearchRequest):
         raise HTTPException(400, "Search query cannot be empty.")
 
     try:
-                spans = [
-                    {
-                        "bbox": list(r),
-                        "page": page_num,
-                        "page_width": page.rect.width,
-                        "page_height": page.rect.height,
-                    }
-                    for r in rects
-                ]
-                matches.append({
-                    "id": str(uuid.uuid4()),
-                    "type": "MANUAL_SEARCH",
-                    "text": query,
-                    "score": 1.0,
-                    "spans": spans,
-                    "color": "#FF6B6B",
-                    "manual": True,
-                })
-
-        doc.close()
+        matches = await run_in_threadpool(do_search_cpu, session["pdf_path"], query)
         return {"matches": matches, "total": sum(len(m["spans"]) for m in matches)}
 
     except Exception as e:
