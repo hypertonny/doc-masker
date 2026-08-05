@@ -404,48 +404,78 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
             entities = await run_in_threadpool(run_presidio, pages)
             logger.info(f"Found {len(entities)} PII entities.")
 
-        # ─── Custom AI Instructions (Groq) ───
-        if ai_instructions and groq_client:
-            logger.info(f"Processing AI instructions: {ai_instructions}")
+        # ─── Custom AI & Keyword Instructions ───
+        if ai_instructions and ai_instructions.strip():
+            logger.info(f"Processing Custom AI instructions: {ai_instructions}")
             full_text = " ".join([sp["text"] for p in pages for sp in p["spans"]])
-            # Send to Groq
-            prompt = (
-                "You are an AI redaction assistant. "
-                f"User Instructions: '{ai_instructions}'\n\n"
-                f"Document Text:\n{full_text[:4000]}\n\n" # Limiting to 4000 chars for context
-                "Identify EXACT occurrences of words, names, dates, or phrases in the text that should be redacted to fulfill these instructions.\n"
-                "Return ONLY a valid JSON array of strings containing the exact text matches. "
-                "Do NOT return anything else."
-            )
-            try:
-                chat_completion = await run_in_threadpool(
-                    groq_client.chat.completions.create,
-                    messages=[
-                        {"role": "system", "content": "You output only JSON arrays of strings."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    model="llama3-8b-8192",
-                    temperature=0,
+            
+            # 1. Extract rule-based keywords directly from user input (works without Groq too)
+            rule_keywords = []
+            for line in ai_instructions.splitlines():
+                line_str = line.strip()
+                if not line_str: continue
+                rule_keywords.append(line_str)
+                if ":" in line_str:
+                    val = line_str.split(":", 1)[1].strip()
+                    if len(val) >= 2: rule_keywords.append(val)
+                elif "=" in line_str:
+                    val = line_str.split("=", 1)[1].strip()
+                    if len(val) >= 2: rule_keywords.append(val)
+                elif "-" in line_str:
+                    val = line_str.split("-", 1)[1].strip()
+                    if len(val) >= 2: rule_keywords.append(val)
+
+            # 2. Extract LLM keywords via Groq if available
+            groq_keywords = []
+            if groq_client:
+                prompt = (
+                    "You are an expert AI document redaction assistant.\n"
+                    f"User Redaction Instructions:\n'{ai_instructions}'\n\n"
+                    f"Document Text:\n{full_text[:4000]}\n\n"
+                    "Task: Extract ALL exact names, numbers, IDs, dates, and values mentioned or requested in the User Instructions that exist in the Document Text.\n"
+                    "CRITICAL RULES:\n"
+                    "1. Output only exact atomic strings/values as they literally appear in the document (e.g. 'E9130638', 'Singlife CareShield Standard', 'Chuah Chong Kheng Jonathan').\n"
+                    "2. Do NOT include surrounding label prefixes like 'Policy Number :' unless the user specifically asks to mask the label.\n"
+                    "3. Return ONLY a valid JSON array of strings.\n"
+                    "Example output format: [\"E9130638\", \"Singlife CareShield Standard\", \"Chuah Chong Kheng Jonathan\"]"
                 )
-                response_content = chat_completion.choices[0].message.content.strip()
-                if response_content.startswith("```json"):
-                    response_content = response_content[7:-3]
-                if response_content.startswith("```"):
-                    response_content = response_content[3:-3]
-                
-                keywords = json.loads(response_content)
-                if isinstance(keywords, list):
-                    for kw in keywords:
-                        if not kw or not isinstance(kw, str) or len(kw) < 2: continue
-                        # Find occurrences in PDF
-                        matches = await run_in_threadpool(do_search_cpu, str(pdf_path), kw)
-                        for m in matches:
-                            m["type"] = "AI_INSTRUCTION"
-                            m["color"] = "#2DD4BF"
-                            # Add to entities if not duplicate by text and page
-                            entities.append(m)
-            except Exception as e:
-                logger.error(f"Failed to process AI instructions: {e}")
+                try:
+                    chat_completion = await run_in_threadpool(
+                        groq_client.chat.completions.create,
+                        messages=[
+                            {"role": "system", "content": "You output only JSON arrays of strings."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        model="llama3-8b-8192",
+                        temperature=0,
+                    )
+                    content = chat_completion.choices[0].message.content.strip()
+                    if content.startswith("```json"): content = content[7:-3].strip()
+                    if content.startswith("```"): content = content[3:-3].strip()
+                    parsed = json.loads(content)
+                    if isinstance(parsed, list):
+                        groq_keywords = [str(x).strip() for x in parsed if isinstance(x, (str, int)) and len(str(x).strip()) >= 2]
+                except Exception as e:
+                    logger.error(f"Failed to process Groq AI instructions: {e}")
+
+            # Combine and deduplicate candidates
+            candidate_kws = []
+            seen_kws = set()
+            for kw in rule_keywords + groq_keywords:
+                k_clean = kw.strip()
+                if len(k_clean) >= 2 and k_clean.lower() not in seen_kws:
+                    seen_kws.add(k_clean.lower())
+                    candidate_kws.append(k_clean)
+
+            # Search PDF for each candidate keyword
+            for kw in candidate_kws:
+                matches = await run_in_threadpool(do_search_cpu, str(pdf_path), kw)
+                for m in matches:
+                    m["type"] = "AI_INSTRUCTION"
+                    m["color"] = "#2DD4BF"
+                    # Add to entities if not duplicate
+                    if not any(e["text"] == m["text"] and e["spans"] == m["spans"] for e in entities):
+                        entities.append(m)
 
         # Generate page previews (clean, no highlights yet)
         previews = []
@@ -593,9 +623,24 @@ class SearchRequest(BaseModel):
 def do_search_cpu(pdf_path, query):
     doc = fitz.open(pdf_path)
     matches = []
+    query_str = str(query).strip()
+    if not query_str:
+        doc.close()
+        return []
     
     for page_num, page in enumerate(doc):
-        rects = page.search_for(query, quads=False)
+        rects = page.search_for(query_str, quads=False)
+        
+        # Fallback: if searching for a full line like "Policy Number : E9130638" yields 0 matches
+        # due to PDF multi-spacing/tabbing, fallback to searching for the value after ':' or '='
+        matched_text = query_str
+        if not rects and (":" in query_str or "=" in query_str):
+            sub_query = query_str.split(":", 1)[1].strip() if ":" in query_str else query_str.split("=", 1)[1].strip()
+            if len(sub_query) >= 2:
+                rects = page.search_for(sub_query, quads=False)
+                if rects:
+                    matched_text = sub_query
+
         if rects:
             spans = [
                 {
@@ -609,7 +654,7 @@ def do_search_cpu(pdf_path, query):
             matches.append({
                 "id": str(uuid.uuid4()),
                 "type": "MANUAL_SEARCH",
-                "text": query,
+                "text": matched_text,
                 "score": 1.0,
                 "spans": spans,
                 "color": "#FF6B6B",
