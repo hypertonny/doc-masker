@@ -16,8 +16,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download the spaCy NLP model required by Presidio
-RUN python -m spacy download en_core_web_lg
+# Download the spaCy NLP model required by Presidio (using small model for faster builds)
+RUN python -m spacy download en_core_web_sm
 
 # Copy the rest of the application
 COPY . .
