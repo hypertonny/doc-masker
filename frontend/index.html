@@ -70,7 +70,7 @@
       </div>
 
       <div class="upload-zone" id="upload-zone">
-        <input type="file" id="file-input" accept="application/pdf" hidden />
+        <input type="file" id="file-input" accept="application/pdf" multiple hidden />
         <div class="upload-icon">
           <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect x="8" y="8" width="48" height="56" rx="6" stroke="currentColor" stroke-width="2.5"/>
@@ -161,7 +161,10 @@
         <!-- Left: PDF Preview -->
         <div class="preview-pane">
           <div class="pane-header">
-            <h2 class="pane-title">Document Preview</h2>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <h2 class="pane-title">Document Preview</h2>
+              <select id="doc-switcher" class="doc-switcher hidden"></select>
+            </div>
             <div style="display:flex;align-items:center;gap:10px;">
               <button class="draw-mode-btn" id="draw-mode-btn" title="Draw redaction zone">
                 <svg viewBox="0 0 20 20" fill="none" width="14" height="14"><path d="M3 17l4-1L17 6a1.41 1.41 0 00-2-2L5 14l-2 3z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.5 4.5l1 1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>

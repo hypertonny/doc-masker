@@ -6,17 +6,17 @@ const API = '';   // Same-origin: FastAPI serves frontend
 
 // ── State ────────────────────────────────────────────────────
 let state = {
-  sessionId: null,
-  filename: null,
-  entities: [],           // all entities from backend
-  previews: [],           // [{page, width, height, image_b64}]
-  pageCount: 0,
+  sessions: [],           // array of { sessionId, filename, entities, previews, pageCount, ocrUsed }
+  activeSessionIndex: 0,
   currentPage: 0,
-  ocrUsed: false,
   activeFilter: 'ALL',
-  scaleX: 1, scaleY: 1,  // pdf-units → canvas-pixel scale
-  drawMode: false,        // draw-to-redact mode
+  scaleX: 1, scaleY: 1,
+  drawMode: false,
 };
+
+function getActiveSession() {
+  return state.sessions[state.activeSessionIndex];
+}
 
 // ── DOM refs ─────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -66,11 +66,11 @@ function showPanel(id) {
 }
 
 // ── Upload Zone ───────────────────────────────────────────────
-let selectedFile = null;
+let selectedFiles = [];
 
 browseBtn.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
 uploadZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 
 uploadZone.addEventListener('dragover', e => {
   e.preventDefault(); uploadZone.classList.add('drag-over');
@@ -78,75 +78,78 @@ uploadZone.addEventListener('dragover', e => {
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
 uploadZone.addEventListener('drop', e => {
   e.preventDefault(); uploadZone.classList.remove('drag-over');
-  handleFile(e.dataTransfer.files[0]);
+  handleFiles(e.dataTransfer.files);
 });
 
-function handleFile(file) {
-  if (!file) return;
-  if (file.type !== 'application/pdf') {
-    showToast('Please upload a PDF file.', 'error'); return;
+function handleFiles(files) {
+  if (!files || files.length === 0) return;
+  const pdfs = Array.from(files).filter(f => f.type === 'application/pdf');
+  if (pdfs.length === 0) {
+    showToast('Please upload PDF files.', 'error'); return;
   }
-  selectedFile = file;
-  uploadFilename.textContent = `📄  ${file.name}  (${formatBytes(file.size)})`;
+  selectedFiles = pdfs;
+  if (pdfs.length === 1) {
+    uploadFilename.textContent = `📄  ${pdfs[0].name}  (${formatBytes(pdfs[0].size)})`;
+  } else {
+    uploadFilename.textContent = `📄  ${pdfs.length} files selected`;
+  }
   uploadFilename.classList.remove('hidden');
   analyzeBtn.disabled = false;
 }
 
 analyzeBtn.addEventListener('click', () => {
-  if (!selectedFile) return;
-  uploadAndAnalyze(selectedFile);
+  if (selectedFiles.length === 0) return;
+  uploadAndAnalyze(selectedFiles);
 });
 
 // ── Upload + Analyze ──────────────────────────────────────────
-async function uploadAndAnalyze(file) {
+async function uploadAndAnalyze(files) {
   showPanel('panel-processing');
   setStep(2);
-
-  setProgress(10, 'Uploading PDF…', 'Sending your document to the server', 'proc-upload', 'active');
-
-  const form = new FormData();
-  form.append('file', file);
-
-  let data;
-  try {
-    const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+  state.sessions = [];
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    setProgress(10 + (i / files.length) * 80, `Uploading & Analyzing ${file.name} (${i+1}/${files.length})`, 'This might take a moment...', 'proc-upload', 'active');
+    
+    const form = new FormData();
+    form.append('file', file);
+    
+    try {
+      const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      state.sessions.push({
+        sessionId: data.session_id,
+        filename: data.filename,
+        entities: data.entities,
+        previews: data.previews,
+        pageCount: data.page_count,
+        ocrUsed: data.ocr_used,
+        manualRegions: [],
+        checkedEntityIds: new Set()
+      });
+    } catch (e) {
+      showToast(`Failed on ${file.name}: ${e.message}`, 'error');
     }
-    data = await res.json();
-  } catch (e) {
+  }
+
+  if (state.sessions.length === 0) {
     showPanel('panel-upload');
     setStep(1);
-    showToast(`Upload failed: ${e.message}`, 'error');
     return;
   }
 
-  markDone('proc-upload');
-  setProgress(55, 'Analyzing PII…', 'Presidio is scanning for sensitive entities', 'proc-pii', 'active');
-  if (data.ocr_used) markDone('proc-ocr');
-  else markSkipped('proc-ocr');
-
-  // Small UI delay so user sees transitions
-  await sleep(600);
-
-  markDone('proc-pii');
-  setProgress(85, 'Building Preview…', 'Rendering annotated page images', 'proc-preview', 'active');
-  await sleep(400);
-  markDone('proc-preview');
-  setProgress(100, 'Ready!', '', '', '');
-
+  setProgress(100, 'Ready!', 'All documents processed.', '', '');
   await sleep(300);
 
-  // Populate state
-  state.sessionId = data.session_id;
-  state.filename   = data.filename;
-  state.entities   = data.entities;
-  state.previews   = data.previews;
-  state.pageCount  = data.page_count;
-  state.ocrUsed    = data.ocr_used;
-  state.currentPage= 0;
+  state.activeSessionIndex = 0;
+  state.currentPage = 0;
   state.activeFilter = 'ALL';
+  state.drawMode = false;
 
   buildReviewUI();
   showPanel('panel-review');
@@ -179,11 +182,34 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ── Build Review UI ───────────────────────────────────────────
 function buildReviewUI() {
+  const sess = getActiveSession();
+
+  // Document switcher setup
+  const docSwitcher = $('doc-switcher');
+  if (state.sessions.length > 1) {
+    docSwitcher.classList.remove('hidden');
+    docSwitcher.innerHTML = state.sessions.map((s, i) => 
+      `<option value="${i}">${s.filename}</option>`
+    ).join('');
+    docSwitcher.value = state.activeSessionIndex;
+    
+    // Ensure we only bind this once
+    docSwitcher.onchange = (e) => {
+      // Save current selections to session
+      saveSelectionsToSession();
+      state.activeSessionIndex = parseInt(e.target.value, 10);
+      state.currentPage = 0;
+      buildReviewUI();
+    };
+  } else {
+    docSwitcher.classList.add('hidden');
+  }
+
   // OCR badge
-  ocrBadge.classList.toggle('hidden', !state.ocrUsed);
+  ocrBadge.classList.toggle('hidden', !sess.ocrUsed);
 
   // Filter pills
-  const types = [...new Set(state.entities.map(e => e.type))].sort();
+  const types = [...new Set(sess.entities.map(e => e.type))].sort();
   filterPills.innerHTML = `<button class="pill active" data-type="ALL">All</button>`;
   types.forEach(t => {
     const btn = document.createElement('button');
@@ -200,7 +226,7 @@ function buildReviewUI() {
   renderEntityList();
 
   // Page nav
-  pageCounter.textContent = `Page 1 / ${state.pageCount}`;
+  pageCounter.textContent = `Page 1 / ${sess.pageCount}`;
   renderPage(0);
   updateStats();
 
@@ -241,10 +267,11 @@ function buildReviewUI() {
     searchBtn.disabled = true;
     searchBtn.textContent = '…';
     try {
+      const sess = getActiveSession();
       const res = await fetch(`${API}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: state.sessionId, query }),
+        body: JSON.stringify({ session_id: sess.sessionId, query }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
@@ -285,17 +312,28 @@ function buildReviewUI() {
 }
 
 
+function saveSelectionsToSession() {
+  const sess = getActiveSession();
+  sess.checkedEntityIds = new Set(
+    [...document.querySelectorAll('.entity-checkbox:checked')].map(cb => cb.dataset.entityId)
+  );
+}
+
 function renderEntityList() {
+  const sess = getActiveSession();
   entityList.innerHTML = '';
 
-  if (!state.entities.length) {
+  if (!sess.entities.length) {
     entityList.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.88rem;">
       No PII entities detected in this document.
     </div>`;
     return;
   }
 
-  state.entities.forEach(ent => appendEntityItem(ent, false));
+  sess.entities.forEach(ent => {
+    const isChecked = sess.checkedEntityIds.has(ent.id) || ent.type === 'MANUAL_SEARCH';
+    appendEntityItem(ent, isChecked);
+  });
 }
 
 function appendEntityItem(ent, autoCheck = false) {
@@ -358,13 +396,18 @@ function visibleItems() {
   return [...document.querySelectorAll('.entity-item:not(.hidden-filter) .entity-checkbox')];
 }
 function syncRedactBtn() {
-  const any = [...document.querySelectorAll('.entity-checkbox')].some(c => c.checked);
+  saveSelectionsToSession();
+  let any = false;
+  state.sessions.forEach(sess => {
+    if (sess.checkedEntityIds && sess.checkedEntityIds.size > 0) any = true;
+  });
   redactBtn.disabled = !any;
 }
 function updateStats() {
-  const all = state.entities.length;
+  const sess = getActiveSession();
+  const all = sess.entities.length;
   const sel = [...document.querySelectorAll('.entity-checkbox:checked')].length;
-  const types = [...new Set(state.entities.map(e => e.type))].length;
+  const types = [...new Set(sess.entities.map(e => e.type))].length;
   $('stat-total').textContent    = all;
   $('stat-selected').textContent = sel;
   $('stat-types').textContent    = types;
@@ -372,15 +415,17 @@ function updateStats() {
 
 // ── Page Rendering ────────────────────────────────────────────
 function changePage(delta) {
+  const sess = getActiveSession();
   const next = state.currentPage + delta;
-  if (next < 0 || next >= state.pageCount) return;
+  if (next < 0 || next >= sess.pageCount) return;
   state.currentPage = next;
-  pageCounter.textContent = `Page ${next + 1} / ${state.pageCount}`;
+  pageCounter.textContent = `Page ${next + 1} / ${sess.pageCount}`;
   renderPage(next);
 }
 
 function renderPage(pageNum) {
-  const preview = state.previews[pageNum];
+  const sess = getActiveSession();
+  const preview = sess.previews[pageNum];
   if (!preview) return;
 
   const img = new Image();
@@ -419,7 +464,8 @@ function renderHighlights(pageNum) {
     [...document.querySelectorAll('.entity-checkbox:checked')].map(c => c.dataset.entityId)
   );
 
-  state.entities.forEach(ent => {
+  const sess = getActiveSession();
+  sess.entities.forEach(ent => {
     ent.spans.filter(s => s.page === pageNum).forEach(sp => {
       const [x0, y0, x1, y1] = sp.bbox;
       const px = x0 * state.scaleX * dsx + offX;
@@ -458,22 +504,15 @@ window.addEventListener('resize', () => {
 let rdoneCurrentPage = 0;
 
 async function doRedact() {
-  const checkedBoxes = [...document.querySelectorAll('.entity-checkbox:checked')];
-  const allCheckedIds = checkedBoxes.map(c => c.dataset.entityId);
+  saveSelectionsToSession(); // ensure current view's selections are saved to state
 
-  // Split: backend entities (in session) vs client-only manual entities
-  const backendIds    = allCheckedIds.filter(id => !id.startsWith('draw-'));
-  const manualEntIds  = new Set(allCheckedIds.filter(id => id.startsWith('draw-')));
-
-  // Collect spans from all checked manual/search entities as flat {page, bbox} list
-  const manualRegions = [];
-  state.entities.forEach(ent => {
-    if (allCheckedIds.includes(ent.id) && (ent.manual || ent.type === 'MANUAL_DRAW' || ent.type === 'MANUAL_SEARCH')) {
-      ent.spans.forEach(sp => manualRegions.push({ page: sp.page, bbox: sp.bbox }));
-    }
+  // Check if anything is selected across any session
+  let anySelected = false;
+  state.sessions.forEach(sess => {
+    if (sess.checkedEntityIds && sess.checkedEntityIds.size > 0) anySelected = true;
   });
 
-  if (!backendIds.length && !manualRegions.length) {
+  if (!anySelected) {
     showToast('Select at least one entity or draw a region to redact.', 'error'); return;
   }
 
@@ -481,42 +520,84 @@ async function doRedact() {
   redactBtn.innerHTML = '⏳ Redacting…';
 
   try {
-    const res = await fetch(`${API}/api/redact`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: state.sessionId,
-        selected_entity_ids: backendIds,
-        manual_regions: manualRegions,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-
-    // Store redacted previews in state
-    state.redactedPreviews = data.redacted_previews || [];
+    state.redactedPreviews = [];
     rdoneCurrentPage = 0;
+    
+    let totalRedacted = 0;
+    let totalPages = 0;
+    let allTypes = new Set();
+    
+    // Create ZIP for multiple, but we just use individual downloads for now
+    // Ideally we'd pack them or just provide multiple buttons. For simplicity, we'll just download the first or build a UI.
+    const downloadLinks = [];
 
-    // Build done screen stats
-    const types = [...new Set(
-      state.entities.filter(e => allCheckedIds.includes(e.id)).map(e => e.type)
-    )];
-    $('done-sub').textContent = `${data.redacted_count} PII entr${data.redacted_count === 1 ? 'y' : 'ies'} permanently removed across ${state.pageCount} page${state.pageCount > 1 ? 's' : ''}.`;
+    for (let sess of state.sessions) {
+      if (!sess.checkedEntityIds || sess.checkedEntityIds.size === 0) continue;
+      
+      const allCheckedIds = Array.from(sess.checkedEntityIds);
+      const backendIds    = allCheckedIds.filter(id => !id.startsWith('draw-'));
+      const manualRegions = [];
+      
+      sess.entities.forEach(ent => {
+        if (allCheckedIds.includes(ent.id) && (ent.manual || ent.type === 'MANUAL_DRAW' || ent.type === 'MANUAL_SEARCH')) {
+          ent.spans.forEach(sp => manualRegions.push({ page: sp.page, bbox: sp.bbox }));
+        }
+      });
+
+      const res = await fetch(`${API}/api/redact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sess.sessionId,
+          selected_entity_ids: backendIds,
+          manual_regions: manualRegions,
+        }),
+      });
+      if (!res.ok) throw new Error(`Failed to redact ${sess.filename}`);
+      const data = await res.json();
+      
+      // We will just accumulate the first document's previews for the 'done' screen to keep UI simple
+      if (state.redactedPreviews.length === 0) {
+        state.redactedPreviews = data.redacted_previews || [];
+      }
+      
+      totalRedacted += data.redacted_count;
+      totalPages += sess.pageCount;
+      sess.entities.filter(e => allCheckedIds.includes(e.id)).forEach(e => allTypes.add(e.type));
+      
+      downloadLinks.push({ url: data.download_url, name: `redacted_${sess.filename}` });
+    }
+
+    $('done-sub').textContent = `${totalRedacted} PII entr${totalRedacted === 1 ? 'y' : 'ies'} permanently removed across ${totalPages} page${totalPages > 1 ? 's' : ''}.`;
     $('done-stats').innerHTML = `
-      <div class="done-stat"><span class="done-stat-val">${data.redacted_count}</span><span class="done-stat-lbl">Entities Removed</span></div>
-      <div class="done-stat"><span class="done-stat-val">${types.length}</span><span class="done-stat-lbl">Types Redacted</span></div>
-      <div class="done-stat"><span class="done-stat-val">${state.pageCount}</span><span class="done-stat-lbl">Pages</span></div>
+      <div class="done-stat"><span class="done-stat-val">${totalRedacted}</span><span class="done-stat-lbl">Entities Removed</span></div>
+      <div class="done-stat"><span class="done-stat-val">${allTypes.size}</span><span class="done-stat-lbl">Types Redacted</span></div>
+      <div class="done-stat"><span class="done-stat-val">${totalPages}</span><span class="done-stat-lbl">Pages</span></div>
     `;
 
-    downloadBtn.href = `${API}${data.download_url}`;
-    downloadBtn.download = `redacted_${state.filename || 'document.pdf'}`;
+    // If multiple links, replace downloadBtn with multiple buttons
+    const doneCard = document.querySelector('.done-card');
+    // Remove old multi-downloads if exist
+    doneCard.querySelectorAll('.multi-dl').forEach(el => el.remove());
+    
+    if (downloadLinks.length === 1) {
+      downloadBtn.href = `${API}${downloadLinks[0].url}`;
+      downloadBtn.download = downloadLinks[0].name;
+      downloadBtn.style.display = 'inline-flex';
+    } else {
+      downloadBtn.style.display = 'none';
+      downloadLinks.forEach(dl => {
+        const a = document.createElement('a');
+        a.className = 'btn btn-primary btn-lg multi-dl';
+        a.style.marginTop = '10px';
+        a.href = `${API}${dl.url}`;
+        a.download = dl.name;
+        a.innerHTML = `<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download ${dl.name}`;
+        doneCard.insertBefore(a, startOverBtn);
+      });
+    }
 
-    // Render first page of redacted preview
     renderRdonePage(0);
-
     showPanel('panel-done');
     setStep(4);
 
@@ -559,10 +640,8 @@ $('rdone-next').addEventListener('click', () => {
 
 // ── Start Over ────────────────────────────────────────────────
 startOverBtn.addEventListener('click', () => {
-  selectedFile = null;
-  state = { sessionId:null, filename:null, entities:[], previews:[], pageCount:0,
-            currentPage:0, ocrUsed:false, activeFilter:'ALL', scaleX:1, scaleY:1,
-            drawMode: false };
+  selectedFiles = [];
+  state = { sessions:[], activeSessionIndex:0, currentPage:0, activeFilter:'ALL', scaleX:1, scaleY:1, drawMode: false };
   fileInput.value = '';
   uploadFilename.classList.add('hidden');
   analyzeBtn.disabled = true;

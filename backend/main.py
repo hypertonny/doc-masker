@@ -12,6 +12,10 @@ from typing import List, Optional
 
 import fitz  # PyMuPDF
 from PIL import Image
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Optional OCR deps
 try:
@@ -35,6 +39,17 @@ from presidio_anonymizer.entities import OperatorConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from groq import Groq
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if groq_api_key:
+        groq_client = Groq(api_key=groq_api_key)
+        logger.info("Groq client initialized for intelligent filtering.")
+    else:
+        groq_client = None
+except ImportError:
+    groq_client = None
 
 # ─── App setup ───────────────────────────────────────────────────────────────
 app = FastAPI(title="DocMasker API", version="1.0.0")
@@ -259,6 +274,69 @@ def run_presidio(pages: List[dict]) -> List[dict]:
 
     # Sort: by type, then alphabetically by text
     entities = sorted(grouped.values(), key=lambda e: (e["type"], e["text"].lower()))
+    
+    # ── AI Filtering (Groq) ─────────────────────────────────────────────────────
+    # Use LLM to filter dates so we keep DOBs but discard generic document dates
+    if groq_client and entities:
+        logger.info("Running Groq filtering...")
+        try:
+            # We only filter DATE_TIME entities for now, as requested
+            dates_to_filter = [e["text"] for e in entities if e["type"] == "DATE_TIME"]
+            if dates_to_filter:
+                # Provide snippet context by taking first 2000 chars of full_text
+                context_text = full_text[:2000] 
+                
+                prompt = (
+                    "You are a privacy redaction assistant. Your task is to filter dates found in a document. "
+                    "I want to REDACT sensitive dates like Date of Birth (DOB). "
+                    "I want to KEEP (do not redact) generic dates like Document Generation Date, Expiration Date, etc.\n\n"
+                    f"Document Context Snippet:\n{context_text}\n\n"
+                    "Dates found:\n" + "\n".join(f"- {d}" for d in dates_to_filter) + "\n\n"
+                    "Return a JSON array of string exactly matching the dates that are highly sensitive (e.g., DOBs) and should be redacted. "
+                    "Do NOT return generic dates. ONLY return a valid JSON array of strings and nothing else."
+                )
+                
+                chat_completion = groq_client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You output only JSON arrays. No explanation."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ],
+                    model="llama3-8b-8192",
+                    temperature=0,
+                )
+                
+                # Parse JSON response
+                response_content = chat_completion.choices[0].message.content
+                # Strip markdown code blocks if any
+                if response_content.startswith("```json"):
+                    response_content = response_content[7:-3].strip()
+                elif response_content.startswith("```"):
+                    response_content = response_content[3:-3].strip()
+                    
+                sensitive_dates = json.loads(response_content)
+                logger.info(f"Groq identified sensitive dates: {sensitive_dates}")
+                
+                # Filter out DATE_TIME entities that are not in sensitive_dates
+                filtered_entities = []
+                for e in entities:
+                    if e["type"] == "DATE_TIME":
+                        # Be a bit fuzzy with matching due to LLM sometimes altering strings slightly
+                        if any(sd in e["text"] or e["text"] in sd for sd in sensitive_dates):
+                            filtered_entities.append(e)
+                    else:
+                        filtered_entities.append(e)
+                entities = filtered_entities
+                
+        except Exception as e:
+            logger.error(f"Groq filtering failed: {e}")
+            # fallback to returning all entities if API fails
+
     return entities
 
 
