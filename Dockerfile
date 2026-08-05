@@ -10,14 +10,13 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Install spacy and download the large model FIRST to cache it independently 
+# of other requirements. This prevents a 750MB download when requirements.txt changes.
+RUN pip install --no-cache-dir spacy==3.7.4 && python -m spacy download en_core_web_lg
+
+# Copy requirements and install the rest of the dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Download the spaCy NLP model required by Presidio (using small model for faster builds)
-RUN python -m spacy download en_core_web_sm
 
 # Copy the rest of the application
 COPY . .
