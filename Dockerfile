@@ -10,9 +10,9 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install spacy and download the large model FIRST to cache it independently 
+# Install the large spacy model FIRST to cache it independently 
 # of other requirements. This prevents a 750MB download when requirements.txt changes.
-RUN pip install --no-cache-dir spacy==3.7.4 && python -m spacy download en_core_web_lg
+RUN pip install --no-cache-dir spacy==3.8.13 https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
 
 # Copy requirements and install the rest of the dependencies
 COPY requirements.txt .
