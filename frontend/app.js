@@ -267,26 +267,42 @@ function buildReviewUI() {
     searchBtn.disabled = true;
     searchBtn.textContent = '…';
     try {
-      const sess = getActiveSession();
-      const res = await fetch(`${API}/api/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sess.sessionId, query }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(err.detail);
+      let totalOccurrences = 0;
+      let docsFoundIn = 0;
+
+      // Loop through all uploaded documents (Global Search)
+      for (let sess of state.sessions) {
+        const res = await fetch(`${API}/api/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sess.sessionId, query }),
+        });
+        
+        if (!res.ok) {
+          console.error(`Search failed for ${sess.filename}`);
+          continue;
+        }
+        
+        const data = await res.json();
+        if (data.matches.length > 0) {
+          docsFoundIn++;
+          totalOccurrences += data.total;
+          
+          data.matches.forEach(match => {
+            // Check if already manually added
+            if (sess.entities.find(e => e.type === 'MANUAL_SEARCH' && e.text === match.text)) return;
+            sess.entities.push(match);
+            sess.checkedEntityIds.add(match.id);
+          });
+        }
       }
-      const data = await res.json();
-      if (!data.matches.length) {
-        showToast(`"${query}" not found in document.`, '');
+
+      if (totalOccurrences === 0) {
+        showToast(`"${query}" not found in any document.`, '');
         return;
       }
-      data.matches.forEach(match => {
-        if (state.entities.find(e => e.type === 'MANUAL_SEARCH' && e.text === match.text)) return;
-        state.entities.push(match);
-        appendEntityItem(match, true);
-      });
+
+      // Update UI for the currently active document
       if (!filterPills.querySelector('[data-type="MANUAL_SEARCH"]')) {
         const pill = document.createElement('button');
         pill.className = 'pill';
@@ -295,8 +311,13 @@ function buildReviewUI() {
         pill.addEventListener('click', () => applyFilter('MANUAL_SEARCH'));
         filterPills.appendChild(pill);
       }
-      syncRedactBtn(); updateStats(); renderPage(state.currentPage);
-      showToast(`Found ${data.total} occurrence${data.total === 1 ? '' : 's'} of "${query}" — auto-selected.`, 'success');
+      
+      renderEntityList();
+      syncRedactBtn(); 
+      updateStats(); 
+      renderPage(state.currentPage);
+      
+      showToast(`Found ${totalOccurrences} occurrence${totalOccurrences === 1 ? '' : 's'} across ${docsFoundIn} document${docsFoundIn === 1 ? '' : 's'} — auto-selected.`, 'success');
       searchInput.value = '';
       entityList.scrollTop = entityList.scrollHeight;
     } catch (e) {
