@@ -116,7 +116,10 @@ async function uploadAndAnalyze(files) {
     form.append('file', file);
     
     const aiInst = $('ai-instructions').value.trim();
-    if (aiInst) form.append('ai_instructions', aiInst);
+    if (aiInst) {
+      form.append('ai_instructions', aiInst);
+      form.append('ai_only', $('ai-only-checkbox').checked);
+    }
     
     try {
       const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });

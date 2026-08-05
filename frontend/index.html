@@ -118,6 +118,11 @@
           Custom AI Redaction Instructions (Optional)
         </label>
         <textarea id="ai-instructions" rows="2" placeholder="e.g. 'Mask my name John Doe and my DOB'" style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); color: var(--text); font-family: inherit; resize: vertical;"></textarea>
+        
+        <label style="display: flex; align-items: center; margin-top: 10px; font-size: 0.9rem; color: var(--text-dim); cursor: pointer;">
+          <input type="checkbox" id="ai-only-checkbox" style="margin-right: 8px; accent-color: var(--primary);">
+          Only mask what the AI finds (Skip standard PII detection)
+        </label>
       </div>
 
       <button class="btn btn-primary btn-lg" id="analyze-btn" disabled>

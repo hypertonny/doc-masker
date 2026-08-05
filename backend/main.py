@@ -371,7 +371,7 @@ def render_page_preview(doc: fitz.Document, page_num: int,
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(None)):
+async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(None), ai_only: bool = Form(False)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted.")
 
@@ -396,9 +396,13 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
             pages = await run_in_threadpool(extract_text_native, doc)
             ocr_used = False
 
-        logger.info("Running Presidio…")
-        entities = await run_in_threadpool(run_presidio, pages)
-        logger.info(f"Found {len(entities)} PII entities.")
+        if ai_only and ai_instructions:
+            logger.info("Skipping Presidio because ai_only is True.")
+            entities = []
+        else:
+            logger.info("Running Presidio…")
+            entities = await run_in_threadpool(run_presidio, pages)
+            logger.info(f"Found {len(entities)} PII entities.")
 
         # ─── Custom AI Instructions (Groq) ───
         if ai_instructions and groq_client:
