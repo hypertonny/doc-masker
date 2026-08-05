@@ -115,6 +115,9 @@ async function uploadAndAnalyze(files) {
     const form = new FormData();
     form.append('file', file);
     
+    const aiInst = $('ai-instructions').value.trim();
+    if (aiInst) form.append('ai_instructions', aiInst);
+    
     try {
       const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
       if (!res.ok) {
@@ -122,6 +125,11 @@ async function uploadAndAnalyze(files) {
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       const data = await res.json();
+      const checkedIds = new Set();
+      data.entities.forEach(ent => {
+        if (ent.type === 'AI_INSTRUCTION') checkedIds.add(ent.id);
+      });
+      
       state.sessions.push({
         sessionId: data.session_id,
         filename: data.filename,
@@ -130,7 +138,7 @@ async function uploadAndAnalyze(files) {
         pageCount: data.page_count,
         ocrUsed: data.ocr_used,
         manualRegions: [],
-        checkedEntityIds: new Set()
+        checkedEntityIds: checkedIds
       });
     } catch (e) {
       showToast(`Failed on ${file.name}: ${e.message}`, 'error');
@@ -352,7 +360,7 @@ function renderEntityList() {
   }
 
   sess.entities.forEach(ent => {
-    const isChecked = sess.checkedEntityIds.has(ent.id) || ent.type === 'MANUAL_SEARCH';
+    const isChecked = sess.checkedEntityIds.has(ent.id) || ent.type === 'MANUAL_SEARCH' || ent.type === 'AI_INSTRUCTION';
     appendEntityItem(ent, isChecked);
   });
 }
@@ -560,7 +568,7 @@ async function doRedact() {
       const manualRegions = [];
       
       sess.entities.forEach(ent => {
-        if (allCheckedIds.includes(ent.id) && (ent.manual || ent.type === 'MANUAL_DRAW' || ent.type === 'MANUAL_SEARCH')) {
+        if (allCheckedIds.includes(ent.id) && (ent.manual || ent.type === 'MANUAL_DRAW' || ent.type === 'MANUAL_SEARCH' || ent.type === 'AI_INSTRUCTION')) {
           ent.spans.forEach(sp => manualRegions.push({ page: sp.page, bbox: sp.bbox }));
         }
       });

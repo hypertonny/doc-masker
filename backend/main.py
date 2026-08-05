@@ -25,7 +25,7 @@ try:
 except ImportError:
     TESSERACT_AVAILABLE = False
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -371,7 +371,7 @@ def render_page_preview(doc: fitz.Document, page_num: int,
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(None)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted.")
 
@@ -399,6 +399,49 @@ async def upload_pdf(file: UploadFile = File(...)):
         logger.info("Running Presidio…")
         entities = await run_in_threadpool(run_presidio, pages)
         logger.info(f"Found {len(entities)} PII entities.")
+
+        # ─── Custom AI Instructions (Groq) ───
+        if ai_instructions and groq_client:
+            logger.info(f"Processing AI instructions: {ai_instructions}")
+            full_text = " ".join([sp["text"] for p in pages for sp in p["spans"]])
+            # Send to Groq
+            prompt = (
+                "You are an AI redaction assistant. "
+                f"User Instructions: '{ai_instructions}'\n\n"
+                f"Document Text:\n{full_text[:4000]}\n\n" # Limiting to 4000 chars for context
+                "Identify EXACT occurrences of words, names, dates, or phrases in the text that should be redacted to fulfill these instructions.\n"
+                "Return ONLY a valid JSON array of strings containing the exact text matches. "
+                "Do NOT return anything else."
+            )
+            try:
+                chat_completion = await run_in_threadpool(
+                    groq_client.chat.completions.create,
+                    messages=[
+                        {"role": "system", "content": "You output only JSON arrays of strings."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    model="llama3-8b-8192",
+                    temperature=0,
+                )
+                response_content = chat_completion.choices[0].message.content.strip()
+                if response_content.startswith("```json"):
+                    response_content = response_content[7:-3]
+                if response_content.startswith("```"):
+                    response_content = response_content[3:-3]
+                
+                keywords = json.loads(response_content)
+                if isinstance(keywords, list):
+                    for kw in keywords:
+                        if not kw or not isinstance(kw, str) or len(kw) < 2: continue
+                        # Find occurrences in PDF
+                        matches = await run_in_threadpool(do_search_cpu, str(pdf_path), kw)
+                        for m in matches:
+                            m["type"] = "AI_INSTRUCTION"
+                            m["color"] = "#2DD4BF"
+                            # Add to entities if not duplicate by text and page
+                            entities.append(m)
+            except Exception as e:
+                logger.error(f"Failed to process AI instructions: {e}")
 
         # Generate page previews (clean, no highlights yet)
         previews = []
