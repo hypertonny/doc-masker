@@ -434,9 +434,10 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
                     f"Document Text:\n{full_text[:4000]}\n\n"
                     "Task: Extract ALL exact names, numbers, IDs, dates, and values mentioned or requested in the User Instructions that exist in the Document Text.\n"
                     "CRITICAL RULES:\n"
-                    "1. Output only exact atomic strings/values as they literally appear in the document (e.g. 'E9130638', 'Singlife CareShield Standard', 'Chuah Chong Kheng Jonathan').\n"
-                    "2. Do NOT include surrounding label prefixes like 'Policy Number :' unless the user specifically asks to mask the label.\n"
-                    "3. Return ONLY a valid JSON array of strings.\n"
+                    "1. Honor negative constraints and specific focus requests (e.g., if user asks for 'only DOB, not all dates', extract ONLY the birth date and ignore letter/document dates).\n"
+                    "2. Output only exact atomic strings/values as they literally appear in the document (e.g. 'E9130638', 'Singlife CareShield Standard', 'Chuah Chong Kheng Jonathan').\n"
+                    "3. Do NOT include surrounding label prefixes like 'Policy Number :' unless the user specifically asks to mask the label.\n"
+                    "4. Return ONLY a valid JSON array of strings.\n"
                     "Example output format: [\"E9130638\", \"Singlife CareShield Standard\", \"Chuah Chong Kheng Jonathan\"]"
                 )
                 try:
