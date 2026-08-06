@@ -240,6 +240,32 @@ def run_presidio(pages: List[dict]) -> List[dict]:
             continue
 
         entity_text = full_text[r.start:r.end]
+        
+        # ── Filter out company / customer service contact details ──
+        t_lower = entity_text.strip().lower()
+        context_snippet = full_text[max(0, r.start - 80):min(len(full_text), r.end + 80)].lower()
+        
+        # Skip generic company support emails
+        if r.entity_type == "EMAIL_ADDRESS":
+            corp_prefixes = ("cs_", "cs@", "cs.", "support@", "info@", "contact@", "help@", "service@", 
+                             "enquiry@", "enquiries@", "customercare@", "care@", "sales@", "admin@", 
+                             "noreply@", "no-reply@", "office@", "servicedesk@", "hello@")
+            if any(prefix in t_lower for prefix in corp_prefixes):
+                logger.info(f"Filtering out corporate email: {entity_text}")
+                continue
+
+        # Skip company customer service hotlines / operating hours
+        if r.entity_type == "PHONE_NUMBER":
+            if any(kw in context_snippet for kw in ("hotline", "customer service", "toll free", "toll-free", "operating hours", "servicedesk", "helpdesk")):
+                logger.info(f"Filtering out customer service hotline: {entity_text}")
+                continue
+
+        # Skip operating hours flagged as dates/times
+        if r.entity_type == "DATE_TIME":
+            if any(kw in t_lower for kw in ("am to", "pm to", "mon-fri", "operating hours", "public holidays", "am -", "pm -")):
+                logger.info(f"Filtering out operating hours: {entity_text}")
+                continue
+
         raw_entities.append({
             "type": r.entity_type,
             "text": entity_text,
@@ -432,12 +458,14 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
                     "You are an expert AI document redaction assistant.\n"
                     f"User Redaction Instructions:\n'{ai_instructions}'\n\n"
                     f"Document Text:\n{full_text[:4000]}\n\n"
-                    "Task: Extract ALL exact names, numbers, IDs, dates, and values mentioned or requested in the User Instructions that exist in the Document Text.\n"
+                    "Task: Extract ALL exact client/customer personal details mentioned or requested in the User Instructions that exist in the Document Text.\n"
                     "CRITICAL RULES:\n"
-                    "1. Honor negative constraints and specific focus requests (e.g., if user asks for 'only DOB, not all dates', extract ONLY the birth date and ignore letter/document dates).\n"
-                    "2. Output only exact atomic strings/values as they literally appear in the document (e.g. 'E9130638', 'Singlife CareShield Standard', 'Chuah Chong Kheng Jonathan').\n"
-                    "3. Do NOT include surrounding label prefixes like 'Policy Number :' unless the user specifically asks to mask the label.\n"
-                    "4. Return ONLY a valid JSON array of strings.\n"
+                    "1. Extract ONLY client/customer personal PII (e.g. client names, client address, policy numbers, client DOB).\n"
+                    "2. Do NOT extract company/corporate support details, such as company customer service hotlines, support email addresses (e.g. cs_life@singlife.com), operating hours, or generic letter dates.\n"
+                    "3. Honor negative constraints and specific focus requests (e.g., if user asks for 'only client name/DOB, not all dates', extract ONLY client personal items).\n"
+                    "4. Output only exact atomic strings/values as they literally appear in the document (e.g. 'E9130638', 'Singlife CareShield Standard', 'Chuah Chong Kheng Jonathan').\n"
+                    "5. Do NOT include surrounding label prefixes like 'Policy Number :' unless the user specifically asks to mask the label.\n"
+                    "6. Return ONLY a valid JSON array of strings.\n"
                     "Example output format: [\"E9130638\", \"Singlife CareShield Standard\", \"Chuah Chong Kheng Jonathan\"]"
                 )
                 try:
