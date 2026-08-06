@@ -433,7 +433,7 @@ def render_page_preview(doc: fitz.Document, page_num: int,
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(None), ai_only: bool = Form(False)):
+async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(None), ai_only: bool = Form(False), ai_eval: bool = Form(False)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted.")
 
@@ -463,8 +463,44 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
             entities = []
         else:
             logger.info("Running Presidio…")
-            entities = await run_in_threadpool(run_presidio, pages)
+            entities = await run_in_threadpool(run_presidio, pages, str(pdf_path))
             logger.info(f"Found {len(entities)} PII entities.")
+
+        # ─── Token-Saving AI Smart Audit Flow (Presidio -> JSON -> LLM Audit) ───
+        if ai_eval and groq_client and entities:
+            logger.info("Running AI Smart Audit on candidate entities (Token-saving JSON format)...")
+            candidate_payload = [
+                {"id": ent["id"], "type": ent["type"], "text": ent["text"]}
+                for ent in entities
+            ]
+            eval_prompt = (
+                "You are an expert AI PII Redaction Evaluator.\n"
+                "Here is a JSON list of candidate PII entities detected in a document:\n"
+                f"{json.dumps(candidate_payload, indent=2)}\n\n"
+                "Task: Evaluate each candidate entity and return ONLY those that represent genuine, sensitive CLIENT/CLAIMANT personal details "
+                "(such as client names, client addresses, policy/claim numbers, client DOB, personal contact details).\n"
+                "EXCLUDE company names, corporate support details (e.g. cs_life@singlife.com, hotlines), contract clause definitions, or generic legal dates/durations.\n"
+                "Return ONLY a JSON array containing the exact 'id' strings of the approved client PII entities.\n"
+                "Example format: [\"id-1\", \"id-2\"]"
+            )
+            try:
+                chat_completion = await run_in_threadpool(
+                    groq_client.chat.completions.create,
+                    messages=[
+                        {"role": "system", "content": "You output only JSON arrays of entity ID strings."},
+                        {"role": "user", "content": eval_prompt}
+                    ],
+                    model="llama3-8b-8192",
+                    temperature=0,
+                )
+                eval_content = chat_completion.choices[0].message.content.strip()
+                if eval_content.startswith("```json"): eval_content = eval_content[7:-3].strip()
+                if eval_content.startswith("```"): eval_content = eval_content[3:-3].strip()
+                approved_ids = set(json.loads(eval_content))
+                logger.info(f"AI Smart Audit approved {len(approved_ids)} of {len(entities)} candidate entities.")
+                entities = [ent for ent in entities if ent["id"] in approved_ids]
+            except Exception as e:
+                logger.error(f"Error during AI Smart Audit: {e}")
 
         # ─── Custom AI & Keyword Instructions ───
         if ai_instructions and ai_instructions.strip():
