@@ -204,9 +204,10 @@ def extract_text_ocr(pdf_path: str, doc: fitz.Document) -> List[dict]:
     return pages
 
 
-def run_presidio(pages: List[dict]) -> List[dict]:
-    """Run Presidio on the full document text, return enriched entity list."""
-    # Build full text with character offsets per span
+def run_presidio(pages: List[dict], pdf_path: str = None) -> List[dict]:
+    """Run Presidio on the full document text, return enriched entity list with precise bounding boxes."""
+    doc = fitz.open(pdf_path) if pdf_path else None
+    
     full_text = ""
     span_map = []  # (start_char, end_char, span_info)
     for page_data in pages:
@@ -226,26 +227,14 @@ def run_presidio(pages: List[dict]) -> List[dict]:
 
     raw_entities = []
     for r in results:
-        # Find overlapping spans
-        matched_spans = []
-        for start, end, span, page_num, pw, ph in span_map:
-            if start < r.end and end > r.start:
-                matched_spans.append({
-                    "bbox": span["bbox"],
-                    "page": page_num,
-                    "page_width": pw,
-                    "page_height": ph,
-                })
-        if not matched_spans:
+        entity_text = full_text[r.start:r.end].strip()
+        if not entity_text or len(entity_text) < 2:
             continue
-
-        entity_text = full_text[r.start:r.end]
-        
-        # ── Filter out company / customer service contact details ──
-        t_lower = entity_text.strip().lower()
+            
+        t_lower = entity_text.lower()
         context_snippet = full_text[max(0, r.start - 80):min(len(full_text), r.end + 80)].lower()
         
-        # Skip generic company support emails
+        # ── Filter out company / customer service contact details ──
         if r.entity_type == "EMAIL_ADDRESS":
             corp_prefixes = ("cs_", "cs@", "cs.", "support@", "info@", "contact@", "help@", "service@", 
                              "enquiry@", "enquiries@", "customercare@", "care@", "sales@", "admin@", 
@@ -266,19 +255,60 @@ def run_presidio(pages: List[dict]) -> List[dict]:
                 logger.info(f"Filtering out legal duration/date: {entity_text}")
                 continue
 
-        # Skip generic legal definition terms wrongly tagged as PII
+        # Skip generic legal definition terms & policy headers wrongly tagged as PII
         if r.entity_type in ("PERSON", "NRP", "LOCATION", "ORGANIZATION"):
-            if t_lower in ("child", "dependant care benefit", "dependant", "assured", "company", "singapore ministry", "activities of daily", "appointed assessor", "death benefit", "grace period"):
-                logger.info(f"Filtering out legal boilerplate definition: {entity_text}")
+            illegal_terms = ("child", "dependant care benefit", "dependant", "assured", "company", 
+                             "singapore ministry", "activities of daily", "appointed assessor", 
+                             "death benefit", "grace period", "singlife careshield", "careshield plus", 
+                             "careshield standard", "add-on benefit", "deferment period", "severe disability")
+            if any(term in t_lower for term in illegal_terms):
+                logger.info(f"Filtering out policy boilerplate term: {entity_text}")
                 continue
+
+        # Find target page number
+        target_page = None
+        matched_spans = []
+        for start, end, span, page_num, pw, ph in span_map:
+            if start < r.end and end > r.start:
+                if target_page is None:
+                    target_page = page_num
+                matched_spans.append({
+                    "bbox": span["bbox"],
+                    "page": page_num,
+                    "page_width": pw,
+                    "page_height": ph,
+                })
+        if target_page is None:
+            continue
+
+        # Compute precise tight bounding boxes using page.search_for
+        precise_spans = []
+        if doc and target_page < len(doc):
+            p_rects = doc[target_page].search_for(entity_text, quads=False)
+            if p_rects:
+                pw, ph = doc[target_page].rect.width, doc[target_page].rect.height
+                for rect in p_rects:
+                    precise_spans.append({
+                        "bbox": list(rect),
+                        "page": target_page,
+                        "page_width": pw,
+                        "page_height": ph,
+                    })
+
+        # Fallback to matched span if search_for finds nothing
+        if not precise_spans:
+            precise_spans = matched_spans
 
         raw_entities.append({
             "type": r.entity_type,
             "text": entity_text,
             "score": round(r.score, 3),
-            "spans": matched_spans,
+            "spans": precise_spans,
             "color": ENTITY_COLORS.get(r.entity_type, "#94A3B8"),
         })
+
+    if doc:
+        doc.close()
 
     # ── Group by (type, normalised text) so the same value across pages
     #    becomes ONE entity card → checking it redacts every occurrence.

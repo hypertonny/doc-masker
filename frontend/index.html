@@ -113,16 +113,41 @@
         </div>
       </div>
 
-      <div class="ai-instructions-wrap" style="margin: 24px 0; text-align: left;">
-        <label for="ai-instructions" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text);">
-          Custom AI Redaction Instructions (Optional)
+      <div class="mode-selector-wrap" style="margin: 24px 0; text-align: left;">
+        <label style="display: block; font-weight: 600; margin-bottom: 12px; color: var(--text); font-size: 0.95rem;">
+          Select Redaction Strategy
         </label>
-        <textarea id="ai-instructions" rows="2" placeholder="e.g. 'Mask my name John Doe and my DOB'" style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); color: var(--text); font-family: inherit; resize: vertical;"></textarea>
         
-        <label style="display: flex; align-items: center; margin-top: 10px; font-size: 0.9rem; color: var(--text-dim); cursor: pointer;">
-          <input type="checkbox" id="ai-only-checkbox" style="margin-right: 8px; accent-color: var(--primary);">
-          Only mask what the AI finds (Skip standard PII detection)
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+          <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer;">
+            <input type="radio" name="redaction-mode" value="COMBO" checked style="margin-top: 3px; accent-color: var(--primary);">
+            <div>
+              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">Combo Mode (Recommended)</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Model PII + Custom Keywords & AI Instructions</div>
+            </div>
+          </label>
+
+          <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer;">
+            <input type="radio" name="redaction-mode" value="CUSTOM_ONLY" style="margin-top: 3px; accent-color: var(--primary);">
+            <div>
+              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">Custom Keywords / AI Only</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Mask ONLY what you specify in instructions</div>
+            </div>
+          </label>
+
+          <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer;">
+            <input type="radio" name="redaction-mode" value="MODEL_ONLY" style="margin-top: 3px; accent-color: var(--primary);">
+            <div>
+              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">PII Model Only</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Auto-detect standard PII (Names, IDs, Phones)</div>
+            </div>
+          </label>
+        </div>
+
+        <label for="ai-instructions" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text); font-size: 0.88rem;">
+          Custom Keywords / AI Redaction Instructions
         </label>
+        <textarea id="ai-instructions" rows="2" placeholder="e.g. 'Policy Number : E9130638' or 'Mask my name John Doe and DOB'" style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); color: var(--text); font-family: inherit; resize: vertical;"></textarea>
       </div>
 
       <button class="btn btn-primary btn-lg" id="analyze-btn" disabled>

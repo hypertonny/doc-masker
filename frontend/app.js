@@ -115,10 +115,18 @@ async function uploadAndAnalyze(files) {
     const form = new FormData();
     form.append('file', file);
     
+    const modeEl = document.querySelector('input[name="redaction-mode"]:checked');
+    const selectedMode = modeEl ? modeEl.value : 'COMBO';
     const aiInst = $('ai-instructions').value.trim();
-    if (aiInst) {
-      form.append('ai_instructions', aiInst);
-      form.append('ai_only', $('ai-only-checkbox').checked);
+    
+    if (selectedMode === 'CUSTOM_ONLY') {
+      form.append('ai_instructions', aiInst || 'Mask target client details');
+      form.append('ai_only', 'true');
+    } else if (selectedMode === 'COMBO') {
+      if (aiInst) form.append('ai_instructions', aiInst);
+      form.append('ai_only', 'false');
+    } else if (selectedMode === 'MODEL_ONLY') {
+      form.append('ai_only', 'false');
     }
     
     try {
