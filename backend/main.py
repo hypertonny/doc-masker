@@ -260,10 +260,16 @@ def run_presidio(pages: List[dict]) -> List[dict]:
                 logger.info(f"Filtering out customer service hotline: {entity_text}")
                 continue
 
-        # Skip operating hours flagged as dates/times
+        # Skip operating hours and legal durations flagged as dates/times
         if r.entity_type == "DATE_TIME":
-            if any(kw in t_lower for kw in ("am to", "pm to", "mon-fri", "operating hours", "public holidays", "am -", "pm -")):
-                logger.info(f"Filtering out operating hours: {entity_text}")
+            if any(kw in t_lower for kw in ("am to", "pm to", "mon-fri", "operating hours", "public holidays", "am -", "pm -", "days", "months", "years", "period of", "clause", "act ")):
+                logger.info(f"Filtering out legal duration/date: {entity_text}")
+                continue
+
+        # Skip generic legal definition terms wrongly tagged as PII
+        if r.entity_type in ("PERSON", "NRP", "LOCATION", "ORGANIZATION"):
+            if t_lower in ("child", "dependant care benefit", "dependant", "assured", "company", "singapore ministry", "activities of daily", "appointed assessor", "death benefit", "grace period"):
+                logger.info(f"Filtering out legal boilerplate definition: {entity_text}")
                 continue
 
         raw_entities.append({
