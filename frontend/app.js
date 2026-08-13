@@ -82,6 +82,81 @@ uploadZone.addEventListener('drop', e => {
   handleFiles(e.dataTransfer.files);
 });
 
+// ── Mode Cards active ring ────────────────────────────────────
+document.querySelectorAll('.mode-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    const val = card.querySelector('input[type=radio]').value;
+    updateKeywordSectionVisibility(val);
+  });
+});
+// Set initial active card (COMBO is checked by default)
+document.getElementById('mc-combo').classList.add('active');
+
+function updateKeywordSectionVisibility(mode) {
+  const hint = $('keywords-hint');
+  const badge = $('kw-doc-badge');
+  if (mode === 'MODEL_ONLY') {
+    $('keyword-section').style.opacity = '0.45';
+    $('keyword-section').style.pointerEvents = 'none';
+    if (hint) hint.textContent = 'No keywords needed — model auto-detects PII.';
+    badge && badge.classList.add('hidden');
+  } else {
+    $('keyword-section').style.opacity = '1';
+    $('keyword-section').style.pointerEvents = '';
+    if (hint) hint.innerHTML = 'Each keyword is searched <strong>exactly</strong> and redacted in every uploaded PDF.';
+    // Show "all docs" badge only when multiple files selected
+    if (badge) badge.classList.toggle('hidden', selectedFiles.length < 2);
+  }
+}
+
+// ── Keyword chip system ───────────────────────────────────────
+let kwKeywords = [];
+
+function kwAdd() {
+  const inp = $('kw-input');
+  const raw = inp.value.trim();
+  if (!raw) return;
+  // support comma-separated paste
+  raw.split(',').map(s => s.trim()).filter(Boolean).forEach(kw => {
+    if (!kwKeywords.includes(kw)) {
+      kwKeywords.push(kw);
+    }
+  });
+  inp.value = '';
+  kwRender();
+  kwSync();
+}
+
+function kwRemove(kw) {
+  kwKeywords = kwKeywords.filter(k => k !== kw);
+  kwRender();
+  kwSync();
+}
+
+function kwRender() {
+  const container = $('kw-chips');
+  container.innerHTML = kwKeywords.map(kw =>
+    `<span class="kw-chip">${kw}<button class="kw-chip-remove" onclick="kwRemove(${JSON.stringify(kw)})">✕</button></span>`
+  ).join('');
+}
+
+function kwSync() {
+  // Write newline-separated value to hidden input so upload code can read it
+  $('ai-instructions').value = kwKeywords.join('\n');
+  // Update doc badge
+  const badge = $('kw-doc-badge');
+  if (badge) badge.classList.toggle('hidden', selectedFiles.length < 2);
+}
+
+// Press Enter to add keyword
+$('kw-input') && $('kw-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); kwAdd(); }
+});
+
+
+
 function handleFiles(files) {
   if (!files || files.length === 0) return;
   const pdfs = Array.from(files).filter(f => f.type === 'application/pdf');

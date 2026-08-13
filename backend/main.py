@@ -321,7 +321,14 @@ def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str =
         if r.entity_type == "DATE_TIME":
             import re
 
-            # 1. Reject if it contains a day/time/frequency word (policy durations, not dates)
+            # 1. Context-gate: Only allow if surrounding text suggests a birth date
+            dob_context = full_text[max(0, r.start - 150):min(len(full_text), r.end + 150)].lower()
+            dob_indicators = ["dob", "date of birth", "born", "birth date", "birthdate", "age next birthday", "age last birthday"]
+            if not any(ind in dob_context for ind in dob_indicators):
+                logger.info(f"Filtering DATE_TIME (no DOB context): {entity_text}")
+                continue
+
+            # 2. Reject if it contains a day/time/frequency word (policy durations, not dates)
             duration_words = (
                 "day", "days", "year", "years", "month", "months", "week", "weeks",
                 "annually", "daily", "monthly", "quarterly", "weekly", "yearly",
@@ -335,33 +342,33 @@ def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str =
                 logger.info(f"Filtering duration/policy DATE_TIME: {entity_text}")
                 continue
 
-            # 2. Reject if no digits at all (e.g. word-only like "Daily")
+            # 3. Reject if no digits at all (e.g. word-only like "Daily")
             if not any(ch.isdigit() for ch in entity_text):
                 logger.info(f"Filtering non-numeric DATE_TIME: {entity_text}")
                 continue
 
-            # 3. Reject clause/section numbers (e.g. "2.1.1", "1.2.3.4")
+            # 4. Reject clause/section numbers (e.g. "2.1.1", "1.2.3.4")
             if re.fullmatch(r'\d+(\.\d+)+', entity_text.strip()):
                 logger.info(f"Filtering section number DATE_TIME: {entity_text}")
                 continue
 
-            # 4. Reject list-item markers (e.g. "1) year", "180) days")
+            # 5. Reject list-item markers (e.g. "1) year", "180) days")
             if re.match(r'^\d+\)', entity_text.strip()):
                 logger.info(f"Filtering list-marker DATE_TIME: {entity_text}")
                 continue
 
-            # 5. Reject hyphen-duration terms (e.g. "180-day", "30-day")
+            # 6. Reject hyphen-duration terms (e.g. "180-day", "30-day")
             if re.match(r'^\d+-\w+$', entity_text.strip()):
                 logger.info(f"Filtering hyphen-duration DATE_TIME: {entity_text}")
                 continue
 
-            # 6. Reject bare 4-digit standalone years (e.g. "2001", "2008")
+            # 7. Reject bare 4-digit standalone years (e.g. "2001", "2008")
             #    A real client DOB will always include a day and/or month
             if re.fullmatch(r'\d{4}', entity_text.strip()):
                 logger.info(f"Filtering standalone year DATE_TIME: {entity_text}")
                 continue
 
-            # 7. Reject age-rule words spelled out (e.g. "Age nineteen", "sixty-five")
+            # 8. Reject age-rule words spelled out (e.g. "Age nineteen", "sixty-five")
             age_words = (
                 "nineteen", "sixty-five", "twenty-two", "eighteen", "twenty",
                 "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",

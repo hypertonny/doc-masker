@@ -646,3 +646,168 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* ═══════════════════════════════════════════════════════════════
+   Config Card + Mode Grid
+   ═══════════════════════════════════════════════════════════════ */
+.config-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.config-section { display: flex; flex-direction: column; }
+
+.config-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+/* Mode grid */
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 640px) { .mode-grid { grid-template-columns: 1fr; } }
+
+.mode-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.025);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+  user-select: none;
+}
+.mode-card:hover {
+  border-color: rgba(99,102,241,0.35);
+  background: rgba(99,102,241,0.06);
+}
+.mode-card.mode-featured {
+  border-color: rgba(99,102,241,0.3);
+  background: rgba(99,102,241,0.05);
+}
+.mode-card.active {
+  border-color: var(--indigo);
+  background: rgba(99,102,241,0.1);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15), inset 0 0 0 1px rgba(99,102,241,0.2);
+}
+
+.mode-icon { font-size: 1.4rem; margin-bottom: 2px; }
+.mode-title { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+.mode-desc  { font-size: 0.75rem; color: var(--text-muted); line-height: 1.45; }
+
+.mode-check {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 0.72rem;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.mode-card.active .mode-check { display: flex; }
+
+/* Keyword chip input */
+.kw-input-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.kw-input-wrap input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.3);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.kw-input-wrap input:focus { border-color: var(--indigo); }
+.kw-input-wrap button {
+  padding: 10px 18px;
+  background: rgba(99,102,241,0.15);
+  border: 1px solid rgba(99,102,241,0.35);
+  color: #a5b4fc;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.kw-input-wrap button:hover { background: rgba(99,102,241,0.28); }
+
+.kw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 12px;
+}
+.kw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: #c7d2fe;
+  font-weight: 500;
+  animation: chipIn 0.18s ease;
+}
+@keyframes chipIn {
+  from { transform: scale(0.8); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.kw-chip-remove {
+  background: none;
+  border: none;
+  color: #6366f1;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.85rem;
+  opacity: 0.7;
+  transition: opacity 0.12s;
+}
+.kw-chip-remove:hover { opacity: 1; }
+
+.kw-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(52,211,153,0.1);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: #34d399;
+  letter-spacing: 0.03em;
+}
+.kw-hint {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 10px;
+}
+
