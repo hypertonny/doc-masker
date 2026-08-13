@@ -119,19 +119,11 @@ async function uploadAndAnalyze(files) {
     const selectedMode = modeEl ? modeEl.value : 'COMBO';
     const aiInst = $('ai-instructions').value.trim();
     
-    if (selectedMode === 'AI_EVAL') {
-      if (aiInst) form.append('ai_instructions', aiInst);
-      form.append('ai_only', 'false');
-      form.append('ai_eval', 'true');
-    } else if (selectedMode === 'CUSTOM_ONLY') {
-      form.append('ai_instructions', aiInst || 'Mask target client details');
-      form.append('ai_only', 'true');
-      form.append('ai_eval', 'false');
-    } else if (selectedMode === 'COMBO') {
-      if (aiInst) form.append('ai_instructions', aiInst);
+    if (selectedMode === 'MODEL_ONLY') {
       form.append('ai_only', 'false');
       form.append('ai_eval', 'false');
-    } else if (selectedMode === 'MODEL_ONLY') {
+    } else {
+      if (aiInst) form.append('ai_instructions', aiInst);
       form.append('ai_only', 'false');
       form.append('ai_eval', 'false');
     }
