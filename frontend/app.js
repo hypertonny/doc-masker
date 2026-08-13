@@ -477,37 +477,42 @@ function saveSelectionsToSession() {
 }
 
 function renderEntityList() {
-  const sess = getActiveSession();
   entityList.innerHTML = '';
-
-  if (!sess.entities.length) {
-    entityList.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.88rem;">
-      No PII entities detected in this document.
-    </div>`;
-    return;
-  }
-
-  sess.entities.forEach(ent => {
-    const isChecked = sess.checkedEntityIds.has(ent.id) || ent.type === 'MANUAL_SEARCH' || ent.type === 'AI_INSTRUCTION';
-    appendEntityItem(ent, isChecked);
+  
+  let hasAny = false;
+  
+  // Render entities from ALL sessions
+  state.sessions.forEach((sess, sessIdx) => {
+    if (sess.entities && sess.entities.length > 0) {
+      hasAny = true;
+      sess.entities.forEach(ent => {
+        const isChecked = (sess.checkedEntityIds && sess.checkedEntityIds.has(ent.id)) || 
+                          ent.type === 'MANUAL_SEARCH' || ent.type === 'AI_INSTRUCTION';
+        appendEntityItem(ent, isChecked, sess.filename, sessIdx);
+      });
+    }
   });
+
+  if (!hasAny) {
+    entityList.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.88rem;">
+      No PII entities detected in any document.
+    </div>`;
+  }
 }
 
-function appendEntityItem(ent, autoCheck = false) {
-  // Remove the "no entities" placeholder if present
-  const placeholder = entityList.querySelector('div[style]');
-  if (placeholder) placeholder.remove();
-
+function appendEntityItem(ent, autoCheck = false, filename = '', sessionIdx = 0) {
   const item = document.createElement('div');
   item.className = 'entity-item';
   item.dataset.entityId = ent.id;
   item.dataset.type = ent.type;
+  item.dataset.sessionIdx = sessionIdx;
 
   const pages = [...new Set(ent.spans.map(s => s.page + 1))].join(', ');
   const scoreLabel = ent.type === 'MANUAL_SEARCH' ? '🔍 manual' : `⬆ ${Math.round(ent.score * 100)}%`;
+  const fileBadge = state.sessions.length > 1 ? `<div style="font-size:0.68rem; color:#818cf8; margin-top:4px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escHtml(filename)}">📄 ${escHtml(filename)}</div>` : '';
 
   item.innerHTML = `
-    <input type="checkbox" class="entity-checkbox" id="cb-${ent.id}" data-entity-id="${ent.id}" ${autoCheck ? 'checked' : ''} />
+    <input type="checkbox" class="entity-checkbox" id="cb-${ent.id}" data-entity-id="${ent.id}" data-session-idx="${sessionIdx}" ${autoCheck ? 'checked' : ''} />
     <div class="entity-color-dot" style="background:${ent.color}"></div>
     <div class="entity-body">
       <div class="entity-text" title="${escHtml(ent.text)}">${escHtml(ent.text)}</div>
@@ -518,6 +523,7 @@ function appendEntityItem(ent, autoCheck = false) {
         <span class="entity-score">${scoreLabel}</span>
         <span class="entity-pages">p.${pages}</span>
       </div>
+      ${fileBadge}
     </div>`;
 
   if (autoCheck) item.classList.add('selected');
@@ -525,14 +531,37 @@ function appendEntityItem(ent, autoCheck = false) {
   const cb = item.querySelector('.entity-checkbox');
   cb.addEventListener('change', () => {
     item.classList.toggle('selected', cb.checked);
-    syncRedactBtn(); updateStats(); renderPage(state.currentPage);
+    // update the checked state for the specific session
+    const targetSess = state.sessions[sessionIdx];
+    if (cb.checked) {
+      targetSess.checkedEntityIds.add(ent.id);
+    } else {
+      targetSess.checkedEntityIds.delete(ent.id);
+    }
+    syncRedactBtn(); updateStats(); 
+    if (state.activeSessionIndex === sessionIdx) renderPage(state.currentPage);
   });
+  
   item.addEventListener('click', e => {
     if (e.target === cb) return;
-    cb.checked = !cb.checked;
-    item.classList.toggle('selected', cb.checked);
-    syncRedactBtn(); updateStats(); renderPage(state.currentPage);
-    if (ent.spans.length) changePage(ent.spans[0].page - state.currentPage);
+    
+    // Switch active document if clicking an entity from another document
+    if (state.activeSessionIndex !== sessionIdx) {
+      const docSwitcher = $('document-select');
+      if (docSwitcher) docSwitcher.value = sessionIdx;
+      state.activeSessionIndex = sessionIdx;
+      state.currentPage = ent.spans.length ? ent.spans[0].page : 0;
+      state.zoomLevel = 1.0;
+      applyZoom();
+      buildReviewUI(); // This re-renders but since the entity list contains all, we just need to ensure the canvas is updated
+    } else {
+      cb.checked = !cb.checked;
+      item.classList.toggle('selected', cb.checked);
+      if (cb.checked) state.sessions[sessionIdx].checkedEntityIds.add(ent.id);
+      else state.sessions[sessionIdx].checkedEntityIds.delete(ent.id);
+      syncRedactBtn(); updateStats(); renderPage(state.currentPage);
+      if (ent.spans.length) changePage(ent.spans[0].page - state.currentPage);
+    }
   });
 
   entityList.appendChild(item);
@@ -746,9 +775,9 @@ async function doRedact() {
     `;
 
     // If multiple links, replace downloadBtn with multiple buttons
-    const doneCard = document.querySelector('.done-card');
+    const doneActions = document.querySelector('.done-actions');
     // Remove old multi-downloads if exist
-    doneCard.querySelectorAll('.multi-dl').forEach(el => el.remove());
+    doneActions.querySelectorAll('.multi-dl').forEach(el => el.remove());
     
     if (downloadLinks.length === 1) {
       downloadBtn.href = `${API}${downloadLinks[0].url}`;
@@ -763,7 +792,7 @@ async function doRedact() {
         a.href = `${API}${dl.url}`;
         a.download = dl.name;
         a.innerHTML = `<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download ${dl.name}`;
-        doneCard.insertBefore(a, startOverBtn);
+        doneActions.insertBefore(a, startOverBtn);
       });
     }
 
