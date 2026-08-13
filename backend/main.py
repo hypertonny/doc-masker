@@ -289,21 +289,58 @@ def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str =
                 logger.info(f"Filtering out customer service hotline: {entity_text}")
                 continue
 
-        # Skip operating hours, legal durations, payment frequencies, age rules, and policy dates flagged as DATE_TIME
+        # ── DATE_TIME: strict client-DOB-only filter ──
         if r.entity_type == "DATE_TIME":
-            freq_terms = (
-                "annually", "daily", "monthly", "quarterly", "weekly", "yearly", "per annum", "p.a.",
-                "commencement date", "commencement", "policy date", "effective date", "expiry date", 
-                "maturity date", "issue date", "due date", "anniversary date", "inception date",
-                "age ", "nineteen", "sixty-five", "twenty-two", "eighteen", "twenty", "thirty", "forty",
-                "fifty", "sixty", "seventy", "eighty", "ninety", "grace period", "period of"
+            import re
+
+            # 1. Reject if it contains a day/time/frequency word (policy durations, not dates)
+            duration_words = (
+                "day", "days", "year", "years", "month", "months", "week", "weeks",
+                "annually", "daily", "monthly", "quarterly", "weekly", "yearly",
+                "per annum", "p.a.", "hour", "hours", "annually",
+                "commencement", "effective date", "expiry date", "maturity date",
+                "issue date", "due date", "anniversary", "inception date",
+                "grace period", "period of", "am to", "pm to", "mon-fri",
+                "operating hours", "public holidays", "clause", "act "
             )
-            if any(kw in t_lower for kw in freq_terms) or any(kw in t_lower for kw in ("am to", "pm to", "mon-fri", "operating hours", "public holidays", "clause", "act ")):
-                logger.info(f"Filtering out policy term/duration DATE_TIME: {entity_text}")
+            if any(kw in t_lower for kw in duration_words):
+                logger.info(f"Filtering duration/policy DATE_TIME: {entity_text}")
                 continue
-            # If DATE_TIME contains no digits at all, it's almost certainly a word like "Daily" or "Annually"
-            if not any(char.isdigit() for char in entity_text):
-                logger.info(f"Filtering out non-numeric DATE_TIME term: {entity_text}")
+
+            # 2. Reject if no digits at all (e.g. word-only like "Daily")
+            if not any(ch.isdigit() for ch in entity_text):
+                logger.info(f"Filtering non-numeric DATE_TIME: {entity_text}")
+                continue
+
+            # 3. Reject clause/section numbers (e.g. "2.1.1", "1.2.3.4")
+            if re.fullmatch(r'\d+(\.\d+)+', entity_text.strip()):
+                logger.info(f"Filtering section number DATE_TIME: {entity_text}")
+                continue
+
+            # 4. Reject list-item markers (e.g. "1) year", "180) days")
+            if re.match(r'^\d+\)', entity_text.strip()):
+                logger.info(f"Filtering list-marker DATE_TIME: {entity_text}")
+                continue
+
+            # 5. Reject hyphen-duration terms (e.g. "180-day", "30-day")
+            if re.match(r'^\d+-\w+$', entity_text.strip()):
+                logger.info(f"Filtering hyphen-duration DATE_TIME: {entity_text}")
+                continue
+
+            # 6. Reject bare 4-digit standalone years (e.g. "2001", "2008")
+            #    A real client DOB will always include a day and/or month
+            if re.fullmatch(r'\d{4}', entity_text.strip()):
+                logger.info(f"Filtering standalone year DATE_TIME: {entity_text}")
+                continue
+
+            # 7. Reject age-rule words spelled out (e.g. "Age nineteen", "sixty-five")
+            age_words = (
+                "nineteen", "sixty-five", "twenty-two", "eighteen", "twenty",
+                "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+                "age "
+            )
+            if any(kw in t_lower for kw in age_words):
+                logger.info(f"Filtering age-rule DATE_TIME: {entity_text}")
                 continue
 
         # Skip generic legal definition terms, policy titles, and corporate roles wrongly tagged as PII
