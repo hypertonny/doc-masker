@@ -395,19 +395,39 @@ body {
 
 /* Draw mode */
 /* ── Doc Switcher ── */
+.doc-switcher-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+.doc-switcher-wrap.hidden {
+  display: none !important;
+}
 .doc-switcher {
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  background-color: var(--card-bg);
-  color: var(--text-color);
-  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 600;
   outline: none;
   cursor: pointer;
-  max-width: 150px;
+  max-width: 280px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: all var(--transition);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
-.doc-switcher.hidden {
-  display: none;
+.doc-switcher:hover {
+  border-color: var(--indigo);
+  background: #334155;
+}
+.doc-switcher option {
+  background-color: #0f172a;
+  color: #f8fafc;
+  padding: 10px;
+  font-weight: 500;
 }
 
 .draw-mode-btn {

@@ -190,16 +190,30 @@
 
         <!-- Left: PDF Preview -->
         <div class="preview-pane">
-          <div class="pane-header">
-            <div style="display:flex; flex-direction:column; gap:4px;">
-              <h2 class="pane-title">Document Preview</h2>
-              <select id="doc-switcher" class="doc-switcher hidden"></select>
+          <div class="pane-header" style="flex-wrap: wrap; gap: 12px;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap: wrap;">
+              <h2 class="pane-title" style="display:flex; align-items:center; gap:6px;">
+                <span>📄</span> Document Preview
+              </h2>
+              <div id="doc-switcher-wrap" class="doc-switcher-wrap hidden">
+                <select id="doc-switcher" class="doc-switcher"></select>
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;">
+            
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap: wrap;">
+              <!-- Zoom Controls -->
+              <div class="zoom-controls" style="display:flex; align-items:center; gap:4px; background:rgba(255,255,255,0.05); padding:3px 6px; border-radius:8px; border:1px solid var(--border);">
+                <button class="icon-btn sm" id="zoom-out-btn" title="Zoom Out" style="width:26px; height:26px; font-size:0.9rem;">-</button>
+                <span id="zoom-level-text" style="font-size:0.75rem; font-weight:600; min-width:42px; text-align:center; color:var(--text-muted);">100%</span>
+                <button class="icon-btn sm" id="zoom-in-btn" title="Zoom In" style="width:26px; height:26px; font-size:0.9rem;">+</button>
+                <button class="icon-btn sm" id="zoom-reset-btn" title="Reset Zoom" style="width:26px; height:26px; font-size:0.75rem;">↺</button>
+              </div>
+
               <button class="draw-mode-btn" id="draw-mode-btn" title="Draw redaction zone">
                 <svg viewBox="0 0 20 20" fill="none" width="14" height="14"><path d="M3 17l4-1L17 6a1.41 1.41 0 00-2-2L5 14l-2 3z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.5 4.5l1 1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-                Draw
+                Draw Zone
               </button>
+
               <div class="page-nav">
                 <button class="icon-btn" id="prev-page">‹</button>
                 <span class="page-counter" id="page-counter">Page 1 / 1</span>

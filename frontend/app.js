@@ -12,6 +12,7 @@ let state = {
   activeFilter: 'ALL',
   scaleX: 1, scaleY: 1,
   drawMode: false,
+  zoomLevel: 1.0,
 };
 
 function getActiveSession() {
@@ -203,11 +204,12 @@ function buildReviewUI() {
   const sess = getActiveSession();
 
   // Document switcher setup
+  const docSwitcherWrap = $('doc-switcher-wrap');
   const docSwitcher = $('doc-switcher');
   if (state.sessions.length > 1) {
-    docSwitcher.classList.remove('hidden');
+    if (docSwitcherWrap) docSwitcherWrap.classList.remove('hidden');
     docSwitcher.innerHTML = state.sessions.map((s, i) => 
-      `<option value="${i}">${s.filename}</option>`
+      `<option value="${i}">📄 ${s.filename}</option>`
     ).join('');
     docSwitcher.value = state.activeSessionIndex;
     
@@ -217,10 +219,12 @@ function buildReviewUI() {
       saveSelectionsToSession();
       state.activeSessionIndex = parseInt(e.target.value, 10);
       state.currentPage = 0;
+      state.zoomLevel = 1.0;
+      applyZoom();
       buildReviewUI();
     };
   } else {
-    docSwitcher.classList.add('hidden');
+    if (docSwitcherWrap) docSwitcherWrap.classList.add('hidden');
   }
 
   // OCR badge
@@ -261,6 +265,33 @@ function buildReviewUI() {
   // Page nav buttons
   prevPageBtn.onclick = () => changePage(-1);
   nextPageBtn.onclick = () => changePage(1);
+
+  // Zoom Controls
+  const zoomInBtn    = $('zoom-in-btn');
+  const zoomOutBtn   = $('zoom-out-btn');
+  const zoomResetBtn = $('zoom-reset-btn');
+  if (zoomInBtn) {
+    zoomInBtn.onclick = () => {
+      if (state.zoomLevel < 2.5) {
+        state.zoomLevel += 0.15;
+        applyZoom();
+      }
+    };
+  }
+  if (zoomOutBtn) {
+    zoomOutBtn.onclick = () => {
+      if (state.zoomLevel > 0.5) {
+        state.zoomLevel -= 0.15;
+        applyZoom();
+      }
+    };
+  }
+  if (zoomResetBtn) {
+    zoomResetBtn.onclick = () => {
+      state.zoomLevel = 1.0;
+      applyZoom();
+    };
+  }
 
   // Draw mode toggle
   const drawModeBtn = $('draw-mode-btn');
@@ -452,6 +483,16 @@ function updateStats() {
   $('stat-types').textContent    = types;
 }
 
+function applyZoom() {
+  const z = state.zoomLevel || 1.0;
+  pdfCanvas.style.transform = `scale(${z})`;
+  highlightLayer.style.transform = `scale(${z})`;
+  pdfCanvas.style.transformOrigin = 'top center';
+  highlightLayer.style.transformOrigin = 'top center';
+  const zoomText = $('zoom-level-text');
+  if (zoomText) zoomText.textContent = `${Math.round(z * 100)}%`;
+}
+
 // ── Page Rendering ────────────────────────────────────────────
 function changePage(delta) {
   const sess = getActiveSession();
@@ -473,6 +514,9 @@ function renderPage(pageNum) {
     pdfCanvas.height = img.naturalHeight;
     const ctx = pdfCanvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
+
+    // Apply active zoom level
+    applyZoom();
 
     // Scale factors (PDF units → canvas pixels)
     state.scaleX = img.naturalWidth  / preview.width;
