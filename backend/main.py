@@ -343,20 +343,48 @@ def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str =
                 logger.info(f"Filtering age-rule DATE_TIME: {entity_text}")
                 continue
 
-        # Skip generic legal definition terms, policy titles, and corporate roles wrongly tagged as PII
+        # Skip generic legal definition terms, policy titles, benefit names, and corporate roles wrongly tagged as PERSON
         if r.entity_type in ("PERSON", "NRP", "LOCATION", "ORGANIZATION"):
             illegal_terms = (
-                "child", "dependant care benefit", "dependant", "assured", "company", 
-                "singapore ministry", "activities of daily", "appointed assessor", 
-                "death benefit", "grace period", "singlife careshield", "careshield plus", 
-                "careshield standard", "careshield", "singlife", "add-on benefit", 
-                "deferment period", "severe disability", "policyholder", "proposer", 
-                "life assured", "insured", "assessor", "ministry", "government", 
-                "republic of singapore", "singapore", "central provident fund", "cpf"
+                # Policy benefit/clause titles
+                "lump sum benefit", "lump sum", "care benefit", "death benefit",
+                "disability benefit", "add-on benefit", "rehabilitation benefit",
+                "caregiver benefit", "hospital benefit", "surgical benefit",
+                "accidental benefit", "supplementary benefit", "enhanced benefit",
+                "total disability", "permanent disability", "severe disability",
+                "partial disability", "waiver of premium", "premium waiver",
+                # Policy roles / generic titles (not actual names)
+                "dependant care benefit", "dependant", "child", "assured",
+                "policyholder", "proposer", "life assured", "insured", "assessor",
+                "appointed assessor", "beneficiary", "claimant", "nominee",
+                "plan owner", "policy owner",
+                # Policy periods / structure
+                "deferment period", "grace period", "period of",
+                "commencement", "maturity",
+                # Companies / Brands / Government
+                "company", "singlife", "careshield", "singlife careshield",
+                "careshield plus", "careshield standard", "add-on benefit",
+                "ministry", "government", "singapore ministry",
+                "republic of singapore", "singapore",
+                "central provident fund", "cpf",
+                "activities of daily",
             )
             if any(term in t_lower for term in illegal_terms):
-                logger.info(f"Filtering out policy boilerplate term: {entity_text}")
+                logger.info(f"Filtering out policy boilerplate PERSON term: {entity_text}")
                 continue
+
+            # Also reject any PERSON entity whose text is ALL-CAPS title-case benefit/section heading
+            # (e.g. "Lump Sum Benefit", "Death Benefit" — real names are mixed case first/last)
+            words = entity_text.strip().split()
+            if len(words) >= 2:
+                # If every word is title-case and at least one is a known benefit/policy word
+                benefit_indicators = {"benefit", "care", "sum", "disability", "waiver", "premium",
+                                      "death", "plan", "policy", "cover", "coverage", "rider",
+                                      "allowance", "protection", "supplement", "hospital", "surgical"}
+                word_set = {w.lower().rstrip("s") for w in words}
+                if all(w[0].isupper() for w in words) and word_set & benefit_indicators:
+                    logger.info(f"Filtering out benefit-title PERSON: {entity_text}")
+                    continue
 
         # Find target page number
         target_page = None
