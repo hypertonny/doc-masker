@@ -120,10 +120,21 @@ async function uploadAndAnalyze(files) {
     const selectedMode = modeEl ? modeEl.value : 'COMBO';
     const aiInst = $('ai-instructions').value.trim();
     
-    if (selectedMode === 'MODEL_ONLY') {
+    if (selectedMode === 'KEYWORDS_ONLY') {
+      if (!aiInst) {
+        showToast('Keywords Only mode requires at least one keyword below.', 'error');
+        showPanel('panel-upload');
+        setStep(1);
+        return;
+      }
+      form.append('ai_instructions', aiInst);
+      form.append('ai_only', 'true');   // skip Presidio entirely
+      form.append('ai_eval', 'false');
+    } else if (selectedMode === 'MODEL_ONLY') {
       form.append('ai_only', 'false');
       form.append('ai_eval', 'false');
     } else {
+      // COMBO: model + keywords
       if (aiInst) form.append('ai_instructions', aiInst);
       form.append('ai_only', 'false');
       form.append('ai_eval', 'false');

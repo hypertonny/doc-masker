@@ -118,28 +118,37 @@
           Select Redaction Strategy
         </label>
         
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
           <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer;">
             <input type="radio" name="redaction-mode" value="COMBO" checked style="margin-top: 3px; accent-color: var(--primary);">
             <div>
-              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">PII Model + Custom Keywords</div>
-              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Presidio Model + User Keywords (Standalone)</div>
+              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">Model + Keywords</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Presidio auto-detection + your keywords combined</div>
+            </div>
+          </label>
+
+          <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid rgba(99,102,241,0.45); border-radius: 8px; background: rgba(99,102,241,0.07); cursor: pointer;">
+            <input type="radio" name="redaction-mode" value="KEYWORDS_ONLY" style="margin-top: 3px; accent-color: var(--primary);">
+            <div>
+              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">🔑 Keywords Only</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">No model — strictly redact only what you type below</div>
             </div>
           </label>
 
           <label style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer;">
             <input type="radio" name="redaction-mode" value="MODEL_ONLY" style="margin-top: 3px; accent-color: var(--primary);">
             <div>
-              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">PII Model Only</div>
-              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Standard Presidio Auto-detection</div>
+              <div style="font-weight: 600; color: var(--text); font-size: 0.88rem;">Model Only</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Standard Presidio auto-detection, no keywords</div>
             </div>
           </label>
         </div>
 
-        <label for="ai-instructions" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text); font-size: 0.88rem;">
-          Custom Keywords / AI Redaction Instructions
+        <label for="ai-instructions" id="keywords-label" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text); font-size: 0.88rem;">
+          Custom Keywords to Redact
         </label>
-        <textarea id="ai-instructions" rows="2" placeholder="e.g. 'Policy Number : E9130638' or 'Mask my name John Doe and DOB'" style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); color: var(--text); font-family: inherit; resize: vertical;"></textarea>
+        <textarea id="ai-instructions" rows="3" placeholder="One keyword / value per line e.g.&#10;Chuah Chong Kheng Jonathan&#10;E9130638&#10;98765432" style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); color: var(--text); font-family: inherit; resize: vertical;"></textarea>
+        <p id="keywords-hint" style="font-size:0.75rem; color:var(--text-dim); margin-top:5px;">In <strong>Keywords Only</strong> mode: enter each value on its own line — the model is completely skipped.</p>
       </div>
 
       <button class="btn btn-primary btn-lg" id="analyze-btn" disabled>
