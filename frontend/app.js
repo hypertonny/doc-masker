@@ -859,3 +859,102 @@ window.addEventListener('mouseup', e => {
   renderHighlights(state.currentPage);
   showToast(`✓ Region marked on page ${state.currentPage + 1} — it will be redacted.`, 'success');
 });
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+async function openAuditLog() {
+  document.getElementById('audit-modal').style.display = 'block';
+  document.getElementById('audit-log-body').innerHTML = '<p style="color:#64748b;text-align:center;padding:40px;">Loading…</p>';
+  try {
+    const res = await fetch(`${API}/api/audit-log`);
+    const entries = await res.json();
+    renderAuditLog(entries);
+  } catch (e) {
+    document.getElementById('audit-log-body').innerHTML = `<p style="color:#f87171;text-align:center;padding:40px;">Failed to load audit log: ${e.message}</p>`;
+  }
+}
+
+function closeAuditLog() {
+  document.getElementById('audit-modal').style.display = 'none';
+}
+
+async function clearAuditLog() {
+  if (!confirm('Clear all audit log entries? This cannot be undone.')) return;
+  await fetch(`${API}/api/audit-log`, { method: 'DELETE' });
+  document.getElementById('audit-log-body').innerHTML = '<p style="color:#64748b;text-align:center;padding:40px;">Audit log cleared.</p>';
+}
+
+function renderAuditLog(entries) {
+  const body = document.getElementById('audit-log-body');
+  if (!entries || entries.length === 0) {
+    body.innerHTML = '<p style="color:#64748b;text-align:center;padding:40px;">No sessions recorded yet.</p>';
+    return;
+  }
+
+  const modeBadge = (m) => {
+    const colors = {
+      'Keywords Only':  ['#818cf8','rgba(99,102,241,0.15)'],
+      'Model + Keywords': ['#34d399','rgba(52,211,153,0.12)'],
+      'Model Only':     ['#94a3b8','rgba(148,163,184,0.1)'],
+    };
+    const [fg, bg] = colors[m] || ['#94a3b8','rgba(255,255,255,0.05)'];
+    return `<span style="font-size:0.72rem;font-weight:600;padding:2px 9px;border-radius:20px;background:${bg};color:${fg};white-space:nowrap;">${m}</span>`;
+  };
+
+  const statusBadge = (s) => {
+    const ok = s === 'redacted';
+    return `<span style="font-size:0.72rem;font-weight:600;padding:2px 9px;border-radius:20px;background:${ok?'rgba(34,197,94,0.12)':'rgba(250,204,21,0.1)'};color:${ok?'#4ade80':'#fbbf24'};">${s}</span>`;
+  };
+
+  const pill = (txt, color) =>
+    `<span style="display:inline-block;margin:2px 3px 2px 0;padding:1px 8px;border-radius:12px;font-size:0.71rem;background:rgba(255,255,255,0.05);color:${color||'#94a3b8'};border:1px solid rgba(255,255,255,0.08);">${txt}</span>`;
+
+  const rows = entries.map(e => {
+    const ts = new Date(e.timestamp).toLocaleString('en-GB', {
+      day:'2-digit', month:'short', year:'numeric',
+      hour:'2-digit', minute:'2-digit',
+    });
+    const shortId = e.session_id.split('-')[0].toUpperCase();
+    const kwHtml  = e.keywords_given?.length
+      ? e.keywords_given.map(k => pill(k, '#a5b4fc')).join('')
+      : '<span style="color:#475569;font-size:0.75rem;">—</span>';
+    const redHtml = e.redacted_items?.length
+      ? e.redacted_items.map(r => pill(r.text, '#4ade80')).join('')
+      : '<span style="color:#475569;font-size:0.75rem;">Not yet redacted</span>';
+
+    return `
+      <div style="padding:18px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6366f1;font-weight:600;">#${shortId}</span>
+              ${modeBadge(e.mode)}
+              ${statusBadge(e.status)}
+              ${e.ocr_used ? '<span style="font-size:0.7rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 7px;border-radius:10px;">OCR</span>' : ''}
+            </div>
+            <div style="font-size:0.85rem;font-weight:600;color:#e2e8f0;margin-bottom:2px;">📄 ${e.filename}</div>
+            <div style="font-size:0.72rem;color:#475569;">${ts} · ${e.page_count} page${e.page_count !== 1 ? 's' : ''}</div>
+          </div>
+          <div style="font-size:0.72rem;color:#475569;text-align:right;white-space:nowrap;">
+            <div style="color:#64748b;">${e.entities_detected?.length || 0} detected</div>
+            <div style="color:#4ade80;">${e.redacted_items?.length || 0} redacted</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          <div style="font-size:0.73rem;color:#475569;font-weight:600;letter-spacing:0.05em;margin-bottom:4px;">KEYWORDS GIVEN</div>
+          <div>${kwHtml}</div>
+        </div>
+        <div style="margin-top:8px;">
+          <div style="font-size:0.73rem;color:#475569;font-weight:600;letter-spacing:0.05em;margin-bottom:4px;">ACTUALLY MASKED</div>
+          <div>${redHtml}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  body.innerHTML = `<div style="font-size:0.8rem;color:#475569;margin-bottom:16px;">${entries.length} session${entries.length!==1?'s':''} recorded</div>${rows}`;
+}
+
+// Close modal on backdrop click
+document.getElementById('audit-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('audit-modal')) closeAuditLog();
+});
+

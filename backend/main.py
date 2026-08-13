@@ -66,8 +66,36 @@ app.add_middleware(
 BASE_DIR = Path(__file__).parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
+AUDIT_LOG_FILE = BASE_DIR / "audit_log.json"
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# ─── Audit Log helpers ─────────────────────────────────────────────────────────
+def _load_audit_log() -> list:
+    if AUDIT_LOG_FILE.exists():
+        try:
+            with open(AUDIT_LOG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def _save_audit_log(log: list):
+    with open(AUDIT_LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(log, f, indent=2, ensure_ascii=False)
+
+def append_audit_entry(entry: dict):
+    log = _load_audit_log()
+    log.insert(0, entry)       # newest first
+    _save_audit_log(log)
+
+def update_audit_entry(session_id: str, updates: dict):
+    log = _load_audit_log()
+    for entry in log:
+        if entry.get("session_id") == session_id:
+            entry.update(updates)
+            break
+    _save_audit_log(log)
 
 # ─── Presidio setup ───────────────────────────────────────────────────────────
 logger.info("Loading NLP engine…")
@@ -723,8 +751,39 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
             "ocr_used": ocr_used,
             "filename": file.filename,
         }
-        
         save_session(session_id, session_data)
+
+        # ── Write Audit Log entry ──
+        from datetime import datetime, timezone
+        keywords_given = []
+        if ai_instructions:
+            for line in ai_instructions.splitlines():
+                kw = line.strip()
+                if kw:
+                    keywords_given.append(kw)
+        if ai_only:
+            mode = "Keywords Only"
+        elif not ai_instructions:
+            mode = "Model Only"
+        else:
+            mode = "Model + Keywords"
+
+        audit_entry = {
+            "session_id": session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "filename": file.filename,
+            "mode": mode,
+            "ocr_used": ocr_used,
+            "page_count": page_count,
+            "keywords_given": keywords_given,
+            "entities_detected": [
+                {"type": e["type"], "text": e["text"]} for e in entities
+            ],
+            "status": "analyzed",
+            "redacted_items": [],
+            "output_id": None,
+        }
+        append_audit_entry(audit_entry)
 
         return {
             "session_id": session_id,
@@ -823,6 +882,18 @@ async def redact_pdf(req: RedactRequest):
         session["output_id"] = output_id
         session["filename"]  = session.get("filename", "document.pdf")
         save_session(req.session_id, session)
+
+        # ── Update Audit Log with what was actually redacted ──────────────
+        redacted_items = [
+            {"type": e["type"], "text": e["text"]} for e in to_redact
+        ]
+        if req.manual_regions:
+            redacted_items.append({"type": "MANUAL_ZONE", "text": f"{len(req.manual_regions)} drawn region(s)"})
+        update_audit_entry(req.session_id, {
+            "status": "redacted",
+            "output_id": output_id,
+            "redacted_items": redacted_items,
+        })
 
         return {
             "output_id": output_id,
@@ -938,6 +1009,19 @@ async def download_redacted(output_id: str):
             "Content-Length": str(len(content)),
         },
     )
+
+
+@app.get("/api/audit-log")
+async def get_audit_log():
+    """Return all audit log entries, newest first."""
+    return _load_audit_log()
+
+
+@app.delete("/api/audit-log")
+async def clear_audit_log():
+    """Clear all audit log entries."""
+    _save_audit_log([])
+    return {"status": "cleared"}
 
 
 @app.get("/api/health")
