@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
+from presidio_analyzer import AnalyzerEngine, RecognizerRegistry, PatternRecognizer
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
@@ -101,6 +101,7 @@ ENTITY_TYPES = [
     "NRP", "MEDICAL_LICENSE", "URL", "US_SSN", "US_BANK_NUMBER",
     "US_PASSPORT", "US_DRIVER_LICENSE", "US_ITIN",
     "UK_NHS", "SG_NRIC_FIN", "AU_ABN", "AU_ACN", "AU_TFN", "AU_MEDICARE",
+    "CUSTOM_TARGET_PII",
 ]
 
 ENTITY_COLORS = {
@@ -126,6 +127,7 @@ ENTITY_COLORS = {
     "AU_ACN":            "#93C5FD",
     "AU_TFN":            "#F9A8D4",
     "AU_MEDICARE":       "#C4B5FD",
+    "CUSTOM_TARGET_PII": "#EC4899",
 }
 
 # ─── Models ───────────────────────────────────────────────────────────────────
@@ -204,7 +206,7 @@ def extract_text_ocr(pdf_path: str, doc: fitz.Document) -> List[dict]:
     return pages
 
 
-def run_presidio(pages: List[dict], pdf_path: str = None) -> List[dict]:
+def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str = None) -> List[dict]:
     """Run Presidio on the full document text, return enriched entity list with precise bounding boxes."""
     doc = fitz.open(pdf_path) if pdf_path else None
     
@@ -218,12 +220,50 @@ def run_presidio(pages: List[dict], pdf_path: str = None) -> List[dict]:
             span_map.append((start, end, span, page_data["page"],
                              page_data["width"], page_data["height"]))
 
-    results = analyzer.analyze(
-        text=full_text,
-        language="en",
-        entities=ENTITY_TYPES,
-        score_threshold=0.4,
-    )
+    # ── Dynamically inject UI PatternRecognizers ──
+    custom_recognizer = None
+    custom_entity_name = "CUSTOM_TARGET_PII"
+    active_entity_types = list(ENTITY_TYPES)
+    
+    custom_terms = []
+    if ai_instructions and ai_instructions.strip():
+        for line in ai_instructions.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+            if ":" in line_str:
+                val = line_str.split(":", 1)[1].strip()
+                if len(val) >= 2: custom_terms.append(val)
+            elif "=" in line_str:
+                val = line_str.split("=", 1)[1].strip()
+                if len(val) >= 2: custom_terms.append(val)
+            elif "-" in line_str:
+                val = line_str.split("-", 1)[1].strip()
+                if len(val) >= 2: custom_terms.append(val)
+            else:
+                if len(line_str) >= 2: custom_terms.append(line_str)
+
+    if custom_terms:
+        logger.info(f"Dynamically registering Presidio PatternRecognizer for custom UI terms: {custom_terms}")
+        custom_recognizer = PatternRecognizer(
+            supported_entity=custom_entity_name,
+            deny_list=custom_terms,
+        )
+        analyzer.registry.add_recognizer(custom_recognizer)
+
+    try:
+        results = analyzer.analyze(
+            text=full_text,
+            language="en",
+            entities=active_entity_types,
+            score_threshold=0.4,
+        )
+    finally:
+        if custom_recognizer:
+            try:
+                analyzer.registry.remove_recognizer(custom_recognizer.name)
+            except Exception:
+                pass
 
     raw_entities = []
     for r in results:
@@ -463,7 +503,7 @@ async def upload_pdf(file: UploadFile = File(...), ai_instructions: str = Form(N
             entities = []
         else:
             logger.info("Running Presidio…")
-            entities = await run_in_threadpool(run_presidio, pages, str(pdf_path))
+            entities = await run_in_threadpool(run_presidio, pages, str(pdf_path), ai_instructions)
             logger.info(f"Found {len(entities)} PII entities.")
 
         # ─── Token-Saving AI Smart Audit Flow (Presidio -> JSON -> LLM Audit) ───
