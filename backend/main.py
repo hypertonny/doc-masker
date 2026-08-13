@@ -97,8 +97,8 @@ def save_session(session_id: str, data: dict):
 # ─── PII entity types ─────────────────────────────────────────────────────────
 ENTITY_TYPES = [
     "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-    "IBAN_CODE", "IP_ADDRESS", "LOCATION", "DATE_TIME",
-    "NRP", "MEDICAL_LICENSE", "US_SSN", "US_BANK_NUMBER",
+    "IBAN_CODE", "LOCATION", "DATE_TIME",
+    "MEDICAL_LICENSE", "US_SSN", "US_BANK_NUMBER",
     "US_PASSPORT", "US_DRIVER_LICENSE", "US_ITIN",
     "UK_NHS", "SG_NRIC_FIN", "AU_ABN", "AU_ACN", "AU_TFN", "AU_MEDICARE",
     "CUSTOM_TARGET_PII",
@@ -256,7 +256,7 @@ def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str =
             text=full_text,
             language="en",
             entities=active_entity_types,
-            score_threshold=0.4,
+            score_threshold=0.65,
         )
     finally:
         if custom_recognizer:
@@ -847,14 +847,19 @@ async def download_redacted(output_id: str):
     if not path.exists():
         raise HTTPException(404, "File not found or already cleaned up. Please re-redact.")
 
-    # Derive a friendly filename from the output_id stored in sessions
+    # Derive a friendly filename by scanning disk-based sessions
     friendly_name = "redacted.pdf"
-    for sid, sess in sessions.items():
-        if sess.get("output_id") == output_id:
-            orig = sess.get("filename", "document.pdf")
-            base = orig.rsplit(".", 1)[0]
-            friendly_name = f"{base}_redacted.pdf"
-            break
+    for session_file in UPLOAD_DIR.glob("*.json"):
+        try:
+            with open(session_file, "r", encoding="utf-8") as _f:
+                _sess = json.load(_f)
+            if _sess.get("output_id") == output_id:
+                orig = _sess.get("filename", "document.pdf")
+                base = orig.rsplit(".", 1)[0]
+                friendly_name = f"{base}_redacted.pdf"
+                break
+        except Exception:
+            continue
 
     from fastapi.responses import Response
     with open(str(path), "rb") as f:
