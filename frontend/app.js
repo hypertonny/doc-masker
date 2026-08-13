@@ -91,8 +91,9 @@ document.querySelectorAll('.mode-card').forEach(card => {
     updateKeywordSectionVisibility(val);
   });
 });
-// Set initial active card (COMBO is checked by default)
-document.getElementById('mc-combo').classList.add('active');
+// Set initial active card
+document.getElementById('mc-keywords').classList.add('active');
+updateKeywordSectionVisibility('KEYWORDS_ONLY');
 
 function updateKeywordSectionVisibility(mode) {
   const hint = $('keywords-hint');

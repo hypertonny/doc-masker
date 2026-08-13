@@ -120,12 +120,12 @@
       <div class="config-card" id="config-card">
 
         <!-- Mode Selector -->
-        <div class="config-section">
+        <div class="config-section" style="display: none;">
           <div class="config-label">Redaction Strategy</div>
           <div class="mode-grid" id="mode-grid">
 
-            <label class="mode-card" id="mc-combo">
-              <input type="radio" name="redaction-mode" value="COMBO" checked hidden>
+            <label class="mode-card" id="mc-combo" style="display: none;">
+              <input type="radio" name="redaction-mode" value="COMBO" hidden>
               <div class="mode-icon">🤖</div>
               <div class="mode-title">Model + Keywords</div>
               <div class="mode-desc">Presidio auto-detects PII and also applies your keywords across all docs</div>
@@ -133,14 +133,14 @@
             </label>
 
             <label class="mode-card mode-featured" id="mc-keywords">
-              <input type="radio" name="redaction-mode" value="KEYWORDS_ONLY" hidden>
+              <input type="radio" name="redaction-mode" value="KEYWORDS_ONLY" checked hidden>
               <div class="mode-icon">🔑</div>
               <div class="mode-title">Keywords Only</div>
               <div class="mode-desc">Zero model — strictly redact exactly what you enter, across every uploaded doc</div>
               <div class="mode-check">✓</div>
             </label>
 
-            <label class="mode-card" id="mc-model">
+            <label class="mode-card" id="mc-model" style="display: none;">
               <input type="radio" name="redaction-mode" value="MODEL_ONLY" hidden>
               <div class="mode-icon">🛡️</div>
               <div class="mode-title">Model Only</div>
