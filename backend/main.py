@@ -98,7 +98,7 @@ def save_session(session_id: str, data: dict):
 ENTITY_TYPES = [
     "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
     "IBAN_CODE", "IP_ADDRESS", "LOCATION", "DATE_TIME",
-    "NRP", "MEDICAL_LICENSE", "URL", "US_SSN", "US_BANK_NUMBER",
+    "NRP", "MEDICAL_LICENSE", "US_SSN", "US_BANK_NUMBER",
     "US_PASSPORT", "US_DRIVER_LICENSE", "US_ITIN",
     "UK_NHS", "SG_NRIC_FIN", "AU_ABN", "AU_ACN", "AU_TFN", "AU_MEDICARE",
     "CUSTOM_TARGET_PII",
@@ -289,18 +289,34 @@ def run_presidio(pages: List[dict], pdf_path: str = None, ai_instructions: str =
                 logger.info(f"Filtering out customer service hotline: {entity_text}")
                 continue
 
-        # Skip operating hours and legal durations flagged as dates/times
+        # Skip operating hours, legal durations, payment frequencies, age rules, and policy dates flagged as DATE_TIME
         if r.entity_type == "DATE_TIME":
-            if any(kw in t_lower for kw in ("am to", "pm to", "mon-fri", "operating hours", "public holidays", "am -", "pm -", "days", "months", "years", "period of", "clause", "act ")):
-                logger.info(f"Filtering out legal duration/date: {entity_text}")
+            freq_terms = (
+                "annually", "daily", "monthly", "quarterly", "weekly", "yearly", "per annum", "p.a.",
+                "commencement date", "commencement", "policy date", "effective date", "expiry date", 
+                "maturity date", "issue date", "due date", "anniversary date", "inception date",
+                "age ", "nineteen", "sixty-five", "twenty-two", "eighteen", "twenty", "thirty", "forty",
+                "fifty", "sixty", "seventy", "eighty", "ninety", "grace period", "period of"
+            )
+            if any(kw in t_lower for kw in freq_terms) or any(kw in t_lower for kw in ("am to", "pm to", "mon-fri", "operating hours", "public holidays", "clause", "act ")):
+                logger.info(f"Filtering out policy term/duration DATE_TIME: {entity_text}")
+                continue
+            # If DATE_TIME contains no digits at all, it's almost certainly a word like "Daily" or "Annually"
+            if not any(char.isdigit() for char in entity_text):
+                logger.info(f"Filtering out non-numeric DATE_TIME term: {entity_text}")
                 continue
 
-        # Skip generic legal definition terms & policy headers wrongly tagged as PII
+        # Skip generic legal definition terms, policy titles, and corporate roles wrongly tagged as PII
         if r.entity_type in ("PERSON", "NRP", "LOCATION", "ORGANIZATION"):
-            illegal_terms = ("child", "dependant care benefit", "dependant", "assured", "company", 
-                             "singapore ministry", "activities of daily", "appointed assessor", 
-                             "death benefit", "grace period", "singlife careshield", "careshield plus", 
-                             "careshield standard", "add-on benefit", "deferment period", "severe disability")
+            illegal_terms = (
+                "child", "dependant care benefit", "dependant", "assured", "company", 
+                "singapore ministry", "activities of daily", "appointed assessor", 
+                "death benefit", "grace period", "singlife careshield", "careshield plus", 
+                "careshield standard", "careshield", "singlife", "add-on benefit", 
+                "deferment period", "severe disability", "policyholder", "proposer", 
+                "life assured", "insured", "assessor", "ministry", "government", 
+                "republic of singapore", "singapore", "central provident fund", "cpf"
+            )
             if any(term in t_lower for term in illegal_terms):
                 logger.info(f"Filtering out policy boilerplate term: {entity_text}")
                 continue
